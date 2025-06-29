@@ -109,15 +109,16 @@ class VideoProcessor:
         if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir)
         
-        # Always use original resolution for output
+        # Always use original resolution and frame rate for output
         width = self.original_properties['width']
         height = self.original_properties['height']
+        original_fps = self.original_properties['fps']
         
         self.fourcc = cv2.VideoWriter_fourcc(*codec)  # type: ignore
         self.output_video = cv2.VideoWriter(
             output_path, 
             self.fourcc, 
-            self.fps, 
+            original_fps,  # Use original frame rate, not processing frame rate
             (width, height)
         )
         

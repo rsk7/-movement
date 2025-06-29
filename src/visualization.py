@@ -324,7 +324,9 @@ class PoseVisualizer:
                            show_trails: bool = True,
                            show_angles: bool = True,
                            show_velocity: bool = False,
-                           trail_length: int = 30) -> np.ndarray:
+                           trail_length: int = 30,
+                           output_width: Optional[int] = None,
+                           output_height: Optional[int] = None) -> np.ndarray:
         """
         Create a complete overlay frame with all visualizations.
         
@@ -337,12 +339,23 @@ class PoseVisualizer:
             show_angles: Whether to show joint angles
             show_velocity: Whether to show velocity vectors
             trail_length: Length of motion trails
+            output_width: Target output width for landmark scaling
+            output_height: Target output height for landmark scaling
             
         Returns:
             Frame with all overlays applied
         """
         # Make a copy to avoid modifying original
         overlay_frame = frame.copy()
+        
+        # Use output dimensions if provided, otherwise use frame dimensions
+        draw_width = output_width if output_width is not None else frame.shape[1]
+        draw_height = output_height if output_height is not None else frame.shape[0]
+        
+        # Resize frame to output dimensions if needed
+        if output_width is not None and output_height is not None:
+            if frame.shape[1] != output_width or frame.shape[0] != output_height:
+                overlay_frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_LINEAR)
         
         # Draw motion trails first (behind skeleton)
         if show_trails and pose_history:
