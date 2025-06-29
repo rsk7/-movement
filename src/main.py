@@ -96,61 +96,90 @@ class ClimbingMotionTracker:
         try:
             # Process frames
             pose_frames = []
+            processed_frames = []  # Store processed frames for output generation
             
             # Use target resolution for frame processing
             processing_resolution = (self.video_processor.width, self.video_processor.height) if target_resolution else None
             
+            pose_detected_count = 0
+            total_frames = 0
+            
             for frame, frame_number, timestamp in self.video_processor.get_frames(processing_resolution):
+                # Store processed frame for output generation
+                processed_frames.append(frame.copy())
+                total_frames += 1
+                
                 # Detect pose in frame
                 pose_frame = self.pose_detector.detect_pose(frame, frame_number, timestamp)
                 
                 if pose_frame:
                     pose_frames.append(pose_frame)
                     self.frame_processor.add_pose_frame(pose_frame)
+                    pose_detected_count += 1
                 
                 # Update progress
                 progress_bar.update(1)
             
             progress_bar.close()
             
+            print(f"Total frames processed: {total_frames}")
+            print(f"Frames with pose detection: {pose_detected_count}")
+            print(f"Pose detection rate: {pose_detected_count/total_frames*100:.1f}%")
+            
             # Apply smoothing to pose data
             print("Applying pose smoothing...")
             smoothed_frames = self.pose_detector.smooth_pose_data(pose_frames)
+            print(f"Smoothed pose frames: {len(smoothed_frames)}")
             
             # Process frames with visualizations
             print("Generating output video...")
-            output_progress = create_progress_bar(len(smoothed_frames), "Generating output")
+            output_progress = create_progress_bar(len(processed_frames), "Generating output")
             
-            for i, pose_frame in enumerate(smoothed_frames):
-                # Get original frame
-                if self.video_processor.input_video is not None:
-                    self.video_processor.input_video.set(cv2.CAP_PROP_POS_FRAMES, pose_frame.frame_number)
-                    ret, frame = self.video_processor.input_video.read()
+            # Create a mapping of frame numbers to pose frames
+            pose_frame_map = {}
+            for pose_frame in smoothed_frames:
+                pose_frame_map[pose_frame.frame_number] = pose_frame
+            
+            print(f"Pose frame mapping: {len(pose_frame_map)} frames mapped")
+            
+            for i in range(len(processed_frames)):
+                frame = processed_frames[i]
+                
+                # Get pose frame if available, otherwise use None
+                pose_frame = pose_frame_map.get(i)
+                
+                if pose_frame:
+                    # Calculate joint angles
+                    angles = self.pose_detector.calculate_joint_angles(pose_frame)
                     
-                    if ret:
-                        # Resize frame to match VideoWriter's expected dimensions
-                        frame = cv2.resize(frame, (self.video_processor.width, self.video_processor.height), interpolation=cv2.INTER_AREA)
-                        
-                        # Calculate joint angles
-                        angles = self.pose_detector.calculate_joint_angles(pose_frame)
-                        
-                        # Get pose history for trails
-                        pose_history = self.frame_processor.get_pose_history(i, self.trail_length)
-                        
-                        # Create overlay frame
-                        overlay_frame = self.visualizer.create_overlay_frame(
-                            frame=frame,
-                            pose_frame=pose_frame,
-                            pose_history=pose_history,
-                            angles=angles,
-                            show_trails=self.show_trails,
-                            show_angles=self.show_angles,
-                            show_velocity=self.show_velocity,
-                            trail_length=self.trail_length
-                        )
-                        
-                        # Write frame to output
-                        self.video_processor.write_frame(overlay_frame)
+                    # Get pose history for trails
+                    pose_history = self.frame_processor.get_pose_history(i, self.trail_length)
+                    
+                    # Get original frame dimensions for correct landmark scaling
+                    orig_width = self.video_processor.original_properties['width']
+                    orig_height = self.video_processor.original_properties['height']
+                    
+                    # Create overlay frame with original dimensions for correct landmark positioning
+                    overlay_frame = self.visualizer.create_overlay_frame(
+                        frame=frame,
+                        pose_frame=pose_frame,
+                        pose_history=pose_history,
+                        angles=angles,
+                        show_trails=self.show_trails,
+                        show_angles=self.show_angles,
+                        show_velocity=self.show_velocity,
+                        trail_length=self.trail_length,
+                        output_width=orig_width,
+                        output_height=orig_height
+                    )
+                else:
+                    # No pose detected, just resize the frame to output resolution
+                    orig_width = self.video_processor.original_properties['width']
+                    orig_height = self.video_processor.original_properties['height']
+                    overlay_frame = cv2.resize(frame, (orig_width, orig_height), interpolation=cv2.INTER_LINEAR)
+                
+                # Write frame to output
+                self.video_processor.write_frame(overlay_frame)
                 
                 output_progress.update(1)
             

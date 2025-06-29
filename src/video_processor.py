@@ -108,20 +108,24 @@ class VideoProcessor:
         output_dir = os.path.dirname(output_path)
         if output_dir and not os.path.exists(output_dir):
             os.makedirs(output_dir)
-            
-        # Set up video writer
+        
+        # Always use original resolution and frame rate for output
+        width = self.original_properties['width']
+        height = self.original_properties['height']
+        original_fps = self.original_properties['fps']
+        
         self.fourcc = cv2.VideoWriter_fourcc(*codec)  # type: ignore
         self.output_video = cv2.VideoWriter(
             output_path, 
             self.fourcc, 
-            self.fps, 
-            (self.width, self.height)
+            original_fps,  # Use original frame rate, not processing frame rate
+            (width, height)
         )
         
         if not self.output_video.isOpened():
             print(f"Error: Could not create output video: {output_path}")
             return False
-            
+        
         return True
     
     def get_frames(self, target_resolution: Optional[Tuple[int, int]] = None) -> Generator[Tuple[np.ndarray, int, float], None, None]:
@@ -166,11 +170,29 @@ class VideoProcessor:
         """
         if self.output_video is None:
             return False
-            
-        result = self.output_video.write(frame)  # type: ignore
         
-        # Silently handle failed frame writes (not critical for video creation)
-        return bool(result)
+        # Output video resolution (original)
+        output_height = self.original_properties['height']
+        output_width = self.original_properties['width']
+        
+        # Debug checks before writing frame
+        if not isinstance(frame, np.ndarray):
+            print(f"❌ Frame is not a numpy array: {type(frame)}")
+            return False
+        if frame.dtype != np.uint8:
+            print(f"❌ Frame dtype is not uint8: {frame.dtype}")
+            return False
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            print(f"❌ Frame shape is not (H, W, 3): {frame.shape}")
+            return False
+        if not frame.flags['C_CONTIGUOUS']:
+            print(f"❌ Frame is not C_CONTIGUOUS, making contiguous...")
+            frame = np.ascontiguousarray(frame)
+        # Always resize to output video resolution if needed
+        if frame.shape[1] != output_width or frame.shape[0] != output_height:
+            frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_LINEAR)
+        self.output_video.write(frame)  # type: ignore
+        return True
     
     def close(self):
         """Close video files and release resources."""
