@@ -24,12 +24,18 @@ class VideoProcessor:
         self.height = 0
         self.fourcc = None
         
-    def open_input_video(self, video_path: str) -> bool:
+    def open_input_video(self, video_path: str, 
+                        target_resolution: Optional[Tuple[int, int]] = None,
+                        target_fps: Optional[float] = None,
+                        quality_factor: float = 1.0) -> bool:
         """
-        Open input video file.
+        Open input video file with optional preprocessing.
         
         Args:
             video_path: Path to input video file
+            target_resolution: Target resolution (width, height) for processing
+            target_fps: Target frame rate for processing
+            quality_factor: Quality factor (0.1-1.0) for processing resolution
             
         Returns:
             True if video opened successfully, False otherwise
@@ -44,11 +50,45 @@ class VideoProcessor:
             print(f"Error: Could not open video file: {video_path}")
             return False
             
-        # Get video properties
-        self.fps = self.input_video.get(cv2.CAP_PROP_FPS)
-        self.frame_count = int(self.input_video.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.width = int(self.input_video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.height = int(self.input_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # Get original video properties
+        original_fps = self.input_video.get(cv2.CAP_PROP_FPS)
+        original_frame_count = int(self.input_video.get(cv2.CAP_PROP_FRAME_COUNT))
+        original_width = int(self.input_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        original_height = int(self.input_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Apply quality factor if specified
+        if quality_factor < 1.0:
+            target_width = int(original_width * quality_factor)
+            target_height = int(original_height * quality_factor)
+            target_resolution = (target_width, target_height)
+        
+        # Set processing resolution
+        if target_resolution:
+            self.width, self.height = target_resolution
+            print(f"Processing at {self.width}x{self.height} (downsampled from {original_width}x{original_height})")
+        else:
+            self.width, self.height = original_width, original_height
+        
+        # Set processing frame rate
+        if target_fps:
+            self.fps = target_fps
+            print(f"Processing at {self.fps:.1f} fps (downsampled from {original_fps:.1f} fps)")
+        else:
+            self.fps = original_fps
+        
+        # Calculate new frame count based on fps change
+        if target_fps and target_fps != original_fps:
+            self.frame_count = int(original_frame_count * (target_fps / original_fps))
+        else:
+            self.frame_count = original_frame_count
+        
+        # Store original properties for reference
+        self.original_properties = {
+            'fps': original_fps,
+            'frame_count': original_frame_count,
+            'width': original_width,
+            'height': original_height
+        }
         
         print(f"Video loaded: {self.width}x{self.height} @ {self.fps:.2f} fps, {self.frame_count} frames")
         return True
@@ -70,7 +110,7 @@ class VideoProcessor:
             os.makedirs(output_dir)
             
         # Set up video writer
-        self.fourcc = cv2.VideoWriter_fourcc(*codec)
+        self.fourcc = cv2.VideoWriter_fourcc(*codec)  # type: ignore
         self.output_video = cv2.VideoWriter(
             output_path, 
             self.fourcc, 
@@ -84,10 +124,13 @@ class VideoProcessor:
             
         return True
     
-    def get_frames(self) -> Generator[Tuple[np.ndarray, int, float], None, None]:
+    def get_frames(self, target_resolution: Optional[Tuple[int, int]] = None) -> Generator[Tuple[np.ndarray, int, float], None, None]:
         """
-        Generator to yield frames from input video.
+        Generator to yield frames from input video with optional preprocessing.
         
+        Args:
+            target_resolution: Target resolution for frame processing
+            
         Yields:
             Tuple of (frame, frame_number, timestamp)
         """
@@ -100,10 +143,16 @@ class VideoProcessor:
             ret, frame = self.input_video.read()
             if not ret:
                 break
+            
+            # Resize frame if target resolution is specified
+            if target_resolution:
+                frame = cv2.resize(frame, target_resolution, interpolation=cv2.INTER_AREA)
                 
             timestamp = frame_number / self.fps
             yield frame, frame_number, timestamp
             frame_number += 1
+        
+        return  # Explicit return for generator
     
     def write_frame(self, frame: np.ndarray) -> bool:
         """
@@ -118,7 +167,7 @@ class VideoProcessor:
         if self.output_video is None:
             return False
             
-        return self.output_video.write(frame)
+        return self.output_video.write(frame)  # type: ignore
     
     def close(self):
         """Close video files and release resources."""

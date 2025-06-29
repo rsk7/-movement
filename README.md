@@ -34,8 +34,30 @@ python src/main.py \
     --output output_video.mp4 \
     --show-trails \
     --show-angles \
-    --trail-length 30
+    --trail-length 30 \
+    --quality-factor 0.5 \
+    --target-fps 30
 ```
+
+### Video Information Tool
+
+Get detailed information about your video files before processing:
+
+```bash
+# Basic video info
+python video_info.py your_video.mp4
+
+# Detailed information
+python video_info.py your_video.mp4 --detailed
+
+# Raw JSON output
+python video_info.py your_video.mp4 --json
+
+# Multiple files
+python video_info.py *.mp4
+```
+
+The video info tool will also provide processing recommendations based on your video's characteristics.
 
 ### Parameters
 
@@ -44,6 +66,14 @@ python src/main.py \
 - `--show-trails`: Enable motion trails (shows movement history)
 - `--show-angles`: Display joint angles
 - `--trail-length`: Number of frames to show in motion trails (default: 30)
+- `--quality-factor`: Scale factor for processing resolution (0.1-1.0, default: 1.0)
+- `--target-width`: Target width for processing (maintains aspect ratio)
+- `--target-height`: Target height for processing (maintains aspect ratio)
+- `--target-fps`: Target frame rate for processing (default: original fps)
+- `--model-complexity`: MediaPipe model complexity (0, 1, or 2, default: 1)
+- `--min-detection-confidence`: Minimum confidence for pose detection (default: 0.5)
+- `--min-tracking-confidence`: Minimum confidence for pose tracking (default: 0.5)
+- `--no-smoothing`: Disable pose smoothing
 
 ## Project Structure
 
@@ -81,6 +111,38 @@ climbing-tracker/
 - Wear contrasting clothing to improve pose detection
 - Keep the climber in frame throughout the video
 - Avoid rapid camera movements during recording
+
+## Handling High-Quality Videos
+
+For high-resolution (4K, 1080p) or high-frame-rate (60fps+) videos, consider using preprocessing options to improve performance:
+
+### Performance Recommendations
+
+**For 4K videos:**
+
+```bash
+python src/main.py --input 4k_video.mp4 --output tracked.mp4 --quality-factor 0.5 --target-fps 30
+```
+
+**For 60fps videos:**
+
+```bash
+python src/main.py --input 60fps_video.mp4 --output tracked.mp4 --target-fps 30
+```
+
+**For very large files:**
+
+```bash
+python src/main.py --input large_video.mp4 --output tracked.mp4 --quality-factor 0.3 --target-fps 15
+```
+
+### Processing Speed vs Quality Trade-offs
+
+- **Quality Factor 1.0**: Full resolution, slowest processing
+- **Quality Factor 0.5**: Half resolution, ~4x faster processing
+- **Quality Factor 0.3**: 30% resolution, ~10x faster processing
+- **Target FPS 30**: Good balance for most climbing analysis
+- **Target FPS 15**: Faster processing, still captures key movements
 
 ## Future Enhancements
 

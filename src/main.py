@@ -9,7 +9,7 @@ import sys
 import os
 import cv2
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 # Add src directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -53,13 +53,19 @@ class ClimbingMotionTracker:
         self.show_velocity = False
         self.trail_length = 30
         
-    def process_video(self, input_path: str, output_path: str) -> bool:
+    def process_video(self, input_path: str, output_path: str,
+                     quality_factor: float = 1.0,
+                     target_resolution: Optional[Tuple[int, int]] = None,
+                     target_fps: Optional[float] = None) -> bool:
         """
         Process a climbing video and generate tracked output.
         
         Args:
             input_path: Path to input video file
             output_path: Path for output video file
+            quality_factor: Quality factor for processing (0.1-1.0)
+            target_resolution: Target resolution for processing
+            target_fps: Target frame rate for processing
             
         Returns:
             True if processing successful, False otherwise
@@ -67,8 +73,13 @@ class ClimbingMotionTracker:
         print(f"Processing video: {input_path}")
         print(f"Output will be saved to: {output_path}")
         
-        # Open input video
-        if not self.video_processor.open_input_video(input_path):
+        # Open input video with preprocessing options
+        if not self.video_processor.open_input_video(
+            input_path, 
+            target_resolution=target_resolution,
+            target_fps=target_fps,
+            quality_factor=quality_factor
+        ):
             return False
         
         # Prepare output video
@@ -86,7 +97,10 @@ class ClimbingMotionTracker:
             # Process frames
             pose_frames = []
             
-            for frame, frame_number, timestamp in self.video_processor.get_frames():
+            # Use target resolution for frame processing
+            processing_resolution = (self.video_processor.width, self.video_processor.height) if target_resolution else None
+            
+            for frame, frame_number, timestamp in self.video_processor.get_frames(processing_resolution):
                 # Detect pose in frame
                 pose_frame = self.pose_detector.detect_pose(frame, frame_number, timestamp)
                 
@@ -114,6 +128,10 @@ class ClimbingMotionTracker:
                     ret, frame = self.video_processor.input_video.read()
                     
                     if ret:
+                        # Resize frame if needed
+                        if processing_resolution:
+                            frame = cv2.resize(frame, processing_resolution, interpolation=cv2.INTER_AREA)
+                        
                         # Calculate joint angles
                         angles = self.pose_detector.calculate_joint_angles(pose_frame)
                         
@@ -210,6 +228,16 @@ Examples:
     parser.add_argument('--no-smoothing', action='store_true',
                        help='Disable pose smoothing')
     
+    # Video preprocessing options
+    parser.add_argument('--quality-factor', type=float, default=1.0,
+                       help='Quality factor for processing (0.1-1.0, default: 1.0)')
+    parser.add_argument('--target-width', type=int,
+                       help='Target width for processing (maintains aspect ratio)')
+    parser.add_argument('--target-height', type=int,
+                       help='Target height for processing (maintains aspect ratio)')
+    parser.add_argument('--target-fps', type=float,
+                       help='Target frame rate for processing (default: original fps)')
+    
     args = parser.parse_args()
     
     # Validate input file
@@ -239,7 +267,10 @@ Examples:
     )
     
     # Process video
-    success = tracker.process_video(args.input, args.output)
+    success = tracker.process_video(args.input, args.output,
+                                   args.quality_factor,
+                                   (args.target_width, args.target_height) if args.target_width and args.target_height else None,
+                                   args.target_fps)
     
     if success:
         print(f"\n✅ Processing completed!")
