@@ -331,7 +331,8 @@ class PoseVisualizer:
                            holds: Optional[List] = None,
                            hold_contacts: Optional[Dict] = None,
                            show_holds: bool = False,
-                           show_hold_contacts: bool = False) -> np.ndarray:
+                           show_hold_contacts: bool = False,
+                           show_rhythm: bool = False) -> np.ndarray:
         """
         Create a complete overlay frame with all visualizations.
         
@@ -351,6 +352,7 @@ class PoseVisualizer:
             hold_contacts: Dictionary of hold contacts
             show_holds: Whether to show holds
             show_hold_contacts: Whether to show hold contacts
+            show_rhythm: Whether to show rhythm information
             
         Returns:
             Frame with all overlays applied
@@ -395,6 +397,15 @@ class PoseVisualizer:
         if show_velocity and pose_history:
             overlay_frame = self.draw_velocity_vectors(overlay_frame, pose_history)
         
+        # Draw rhythm information
+        if show_rhythm:
+            # Get rhythm summary from the rhythm detector (passed as parameter)
+            rhythm_summary = getattr(pose_frame, 'rhythm_summary', {})
+            rhythm_events = getattr(pose_frame, 'rhythm_events', [])
+            
+            overlay_frame = self.draw_rhythm_info(overlay_frame, rhythm_summary, draw_width, draw_height)
+            overlay_frame = self.draw_rhythm_events(overlay_frame, rhythm_events, draw_width, draw_height)
+        
         return overlay_frame
     
     def create_overlay_only_frame(self, width: int, height: int, pose_frame: PoseFrame,
@@ -404,6 +415,7 @@ class PoseVisualizer:
                                  show_angles: bool = True,
                                  show_velocity: bool = False,
                                  show_com: bool = True,
+                                 show_rhythm: bool = False,
                                  trail_length: int = 30) -> np.ndarray:
         """
         Create a frame with only pose overlays (no background video).
@@ -418,6 +430,7 @@ class PoseVisualizer:
             show_angles: Whether to show joint angles
             show_velocity: Whether to show velocity vectors
             show_com: Whether to show center of mass
+            show_rhythm: Whether to show rhythm information
             trail_length: Length of motion trails
             
         Returns:
@@ -448,6 +461,16 @@ class PoseVisualizer:
         # Draw velocity vectors
         if show_velocity and pose_history:
             overlay_frame = self.draw_velocity_vectors(overlay_frame, pose_history)
+        
+        # Draw rhythm information
+        if show_rhythm:
+            # Get rhythm summary from the rhythm detector (passed as parameter)
+            rhythm_summary = getattr(pose_frame, 'rhythm_summary', {})
+            overlay_frame = self.draw_rhythm_info(overlay_frame, rhythm_summary, width, height)
+            
+            # Draw rhythm events
+            rhythm_events = getattr(pose_frame, 'rhythm_events', [])
+            overlay_frame = self.draw_rhythm_events(overlay_frame, rhythm_events, width, height)
         
         return overlay_frame
     
@@ -587,5 +610,125 @@ class PoseVisualizer:
                 
                 cv2.line(frame, com_positions[i], com_positions[i+1], 
                         trail_color, 2)
+        
+        return frame
+    
+    def draw_rhythm_info(self, frame: np.ndarray, rhythm_summary: Dict, 
+                        frame_width: int, frame_height: int) -> np.ndarray:
+        """
+        Draw rhythm information on the frame.
+        
+        Args:
+            frame: Input frame
+            rhythm_summary: Rhythm analysis summary
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+            
+        Returns:
+            Frame with rhythm information overlay
+        """
+        if rhythm_summary.get("status") == "insufficient_data":
+            return frame
+        
+        # Get rhythm metrics
+        rhythm_score = rhythm_summary.get("average_rhythm_score", 0)
+        pattern_type = rhythm_summary.get("current_pattern", "unknown")
+        tempo = rhythm_summary.get("average_tempo", 0)
+        regularity = rhythm_summary.get("average_regularity", 0)
+        
+        # Position for rhythm info (top-right corner)
+        x_offset = frame_width - 200
+        y_offset = 30
+        line_height = 25
+        
+        # Background rectangle for text
+        cv2.rectangle(frame, (x_offset - 10, y_offset - 25), 
+                     (x_offset + 190, y_offset + 100), (0, 0, 0), -1)
+        cv2.rectangle(frame, (x_offset - 10, y_offset - 25), 
+                     (x_offset + 190, y_offset + 100), (255, 255, 255), 2)
+        
+        # Rhythm score with color coding
+        score_color = self._get_rhythm_score_color(rhythm_score)
+        score_text = f"Rhythm: {rhythm_score:.1%}"
+        cv2.putText(frame, score_text, (x_offset, y_offset), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, score_color, 2)
+        
+        # Pattern type
+        pattern_color = self._get_pattern_color(pattern_type)
+        pattern_text = f"Pattern: {pattern_type.upper()}"
+        cv2.putText(frame, pattern_text, (x_offset, y_offset + line_height), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, pattern_color, 2)
+        
+        # Tempo
+        tempo_text = f"Tempo: {tempo:.1f}/s"
+        cv2.putText(frame, tempo_text, (x_offset, y_offset + 2 * line_height), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Regularity
+        reg_text = f"Regularity: {regularity:.1%}"
+        cv2.putText(frame, reg_text, (x_offset, y_offset + 3 * line_height), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        return frame
+    
+    def _get_rhythm_score_color(self, score: float) -> Tuple[int, int, int]:
+        """Get color for rhythm score (green=good, yellow=medium, red=poor)."""
+        if score >= 0.7:
+            return (0, 255, 0)  # Green
+        elif score >= 0.4:
+            return (0, 255, 255)  # Yellow
+        else:
+            return (0, 0, 255)  # Red
+    
+    def _get_pattern_color(self, pattern_type: str) -> Tuple[int, int, int]:
+        """Get color for pattern type."""
+        color_map = {
+            'flowing': (0, 255, 0),    # Green
+            'steady': (0, 255, 255),   # Yellow
+            'burst': (0, 0, 255),      # Red
+            'hesitant': (0, 165, 255), # Orange
+            'mixed': (255, 255, 255),  # White
+            'unknown': (128, 128, 128) # Gray
+        }
+        return color_map.get(pattern_type, (255, 255, 255))
+    
+    def draw_rhythm_events(self, frame: np.ndarray, rhythm_events: List, 
+                          frame_width: int, frame_height: int) -> np.ndarray:
+        """
+        Draw rhythm events on the frame.
+        
+        Args:
+            frame: Input frame
+            rhythm_events: List of recent rhythm events
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+            
+        Returns:
+            Frame with rhythm event markers
+        """
+        # Show only recent events (last 10)
+        recent_events = rhythm_events[-10:] if len(rhythm_events) > 10 else rhythm_events
+        
+        for event in recent_events:
+            # Convert normalized coordinates to pixel coordinates
+            x = int(event.com_position[0] * frame_width)
+            y = int(event.com_position[1] * frame_height)
+            
+            # Get color based on event type
+            color_map = {
+                'reach': (0, 0, 255),    # Red
+                'pause': (0, 255, 0),    # Green
+                'steady': (255, 0, 0),   # Blue
+            }
+            color = color_map.get(event.event_type, (255, 255, 255))
+            
+            # Draw event marker
+            cv2.circle(frame, (x, y), 6, color, -1)
+            cv2.circle(frame, (x, y), 10, color, 2)
+            
+            # Add event type label
+            label = event.event_type.upper()
+            cv2.putText(frame, label, (x + 15, y - 5), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
         
         return frame 

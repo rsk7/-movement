@@ -19,6 +19,7 @@ from pose_detection import PoseDetector
 from video_processor import VideoProcessor, FrameProcessor, create_progress_bar
 from visualization import PoseVisualizer
 from hold_detection import HoldDetector
+from rhythm_detection import RhythmDetector
 
 
 class ClimbingMotionTracker:
@@ -49,6 +50,7 @@ class ClimbingMotionTracker:
         self.frame_processor = FrameProcessor()
         self.visualizer = PoseVisualizer()
         self.hold_detector = HoldDetector()
+        self.rhythm_detector = RhythmDetector()
         
         # Processing options
         self.show_trails = True
@@ -57,6 +59,7 @@ class ClimbingMotionTracker:
         self.show_holds = False
         self.show_hold_contacts = False
         self.show_com = True
+        self.show_rhythm = False
         self.trail_length = 30
         
     def process_video(self, input_path: str, output_path: str,
@@ -164,6 +167,18 @@ class ClimbingMotionTracker:
                     # Calculate joint angles
                     angles = self.pose_detector.calculate_joint_angles(pose_frame)
                     
+                    # Add frame to rhythm detector if COM is available
+                    if self.show_rhythm and pose_frame.com is not None:
+                        timestamp = i / video_info['fps']
+                        self.rhythm_detector.add_frame(timestamp, pose_frame)
+                        
+                        # Get rhythm data for visualization
+                        rhythm_summary = self.rhythm_detector.get_current_rhythm_summary()
+                        rhythm_events = self.rhythm_detector.rhythm_events[-10:]  # Last 10 events
+                        
+                        pose_frame.rhythm_summary = rhythm_summary
+                        pose_frame.rhythm_events = rhythm_events
+                    
                     # Get pose history for trails using frame number mapping
                     pose_history = []
                     if self.show_trails:
@@ -196,6 +211,7 @@ class ClimbingMotionTracker:
                             show_angles=self.show_angles,
                             show_velocity=self.show_velocity,
                             show_com=self.show_com,
+                            show_rhythm=self.show_rhythm,
                             trail_length=self.trail_length
                         )
                     else:
@@ -209,6 +225,7 @@ class ClimbingMotionTracker:
                             show_angles=self.show_angles,
                             show_velocity=self.show_velocity,
                             show_com=self.show_com,
+                            show_rhythm=self.show_rhythm,
                             trail_length=self.trail_length,
                             output_width=orig_width,
                             output_height=orig_height,
@@ -255,6 +272,7 @@ class ClimbingMotionTracker:
                                  show_holds: bool = False,
                                  show_hold_contacts: bool = False,
                                  show_com: bool = True,
+                                 show_rhythm: bool = False,
                                  trail_length: int = 30):
         """
         Set visualization options.
@@ -266,6 +284,7 @@ class ClimbingMotionTracker:
             show_holds: Whether to show detected holds
             show_hold_contacts: Whether to show hold contacts
             show_com: Whether to show center of mass
+            show_rhythm: Whether to show rhythm analysis
             trail_length: Length of motion trails
         """
         self.show_trails = show_trails
@@ -274,6 +293,7 @@ class ClimbingMotionTracker:
         self.show_holds = show_holds
         self.show_hold_contacts = show_hold_contacts
         self.show_com = show_com
+        self.show_rhythm = show_rhythm
         self.trail_length = trail_length
 
 
@@ -309,6 +329,8 @@ Examples:
                        help='Highlight holds being contacted by climber')
     parser.add_argument('--show-com', action='store_true',
                        help='Show center of mass')
+    parser.add_argument('--show-rhythm', action='store_true',
+                       help='Show rhythm analysis')
     parser.add_argument('--trail-length', type=int, default=30,
                        help='Number of frames to show in motion trails (default: 30)')
     
@@ -364,6 +386,7 @@ Examples:
         show_holds=args.show_holds,
         show_hold_contacts=args.show_hold_contacts,
         show_com=args.show_com,
+        show_rhythm=args.show_rhythm,
         trail_length=args.trail_length
     )
     
