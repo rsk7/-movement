@@ -26,6 +26,7 @@ class PoseFrame:
     keypoints: Dict[str, PoseKeypoint]
     timestamp: float
     frame_number: int
+    com: Optional[Tuple[float, float, float]] = None
 
 
 class PoseDetector:
@@ -79,6 +80,61 @@ class PoseDetector:
         self.pose_history: List[PoseFrame] = []
         self.max_history_length = 10
         
+        # Define body segments and their relative masses (based on Dempster's data)
+        # These are approximate percentages of total body mass
+        self.segment_masses = {
+            'head': 0.081,      # Head and neck
+            'torso': 0.497,     # Trunk (thorax + abdomen)
+            'left_upper_arm': 0.028,
+            'right_upper_arm': 0.028,
+            'left_forearm': 0.016,
+            'right_forearm': 0.016,
+            'left_hand': 0.006,
+            'right_hand': 0.006,
+            'left_thigh': 0.100,
+            'right_thigh': 0.100,
+            'left_shin': 0.046,
+            'right_shin': 0.046,
+            'left_foot': 0.014,
+            'right_foot': 0.014
+        }
+        
+        # Define segment endpoints for COM calculation
+        self.segment_definitions = {
+            'head': ['nose', 'left_ear', 'right_ear'],
+            'torso': ['left_shoulder', 'right_shoulder', 'left_hip', 'right_hip'],
+            'left_upper_arm': ['left_shoulder', 'left_elbow'],
+            'right_upper_arm': ['right_shoulder', 'right_elbow'],
+            'left_forearm': ['left_elbow', 'left_wrist'],
+            'right_forearm': ['right_elbow', 'right_wrist'],
+            'left_hand': ['left_wrist', 'left_pinky', 'left_index'],
+            'right_hand': ['right_wrist', 'right_pinky', 'right_index'],
+            'left_thigh': ['left_hip', 'left_knee'],
+            'right_thigh': ['right_hip', 'right_knee'],
+            'left_shin': ['left_knee', 'left_ankle'],
+            'right_shin': ['right_knee', 'right_ankle'],
+            'left_foot': ['left_ankle', 'left_heel', 'left_foot_index'],
+            'right_foot': ['right_ankle', 'right_heel', 'right_foot_index']
+        }
+        
+        # COM position within each segment (as fraction from proximal to distal end)
+        self.segment_com_fractions = {
+            'head': 0.5,        # Center of head
+            'torso': 0.5,       # Center of torso
+            'left_upper_arm': 0.436,
+            'right_upper_arm': 0.436,
+            'left_forearm': 0.430,
+            'right_forearm': 0.430,
+            'left_hand': 0.5,
+            'right_hand': 0.5,
+            'left_thigh': 0.433,
+            'right_thigh': 0.433,
+            'left_shin': 0.433,
+            'right_shin': 0.433,
+            'left_foot': 0.5,
+            'right_foot': 0.5
+        }
+        
     def detect_pose(self, frame: np.ndarray, frame_number: int = 0, timestamp: float = 0.0) -> Optional[PoseFrame]:
         """
         Detect pose in a single frame.
@@ -116,6 +172,11 @@ class PoseDetector:
             timestamp=timestamp,
             frame_number=frame_number
         )
+        
+        # Calculate center of mass
+        landmarks = self.get_landmarks(results)
+        if landmarks:
+            pose_frame.com = self.calculate_center_of_mass(landmarks)
         
         # Add to history for smoothing
         self.pose_history.append(pose_frame)
@@ -182,7 +243,8 @@ class PoseDetector:
             smoothed_frames.append(PoseFrame(
                 keypoints=smoothed_keypoints,
                 timestamp=frame.timestamp,
-                frame_number=frame.frame_number
+                frame_number=frame.frame_number,
+                com=frame.com  # Preserve the COM data
             ))
         
         return smoothed_frames
@@ -274,4 +336,97 @@ class PoseDetector:
     
     def release(self):
         """Release resources."""
-        self.pose.close() 
+        self.pose.close()
+
+    def get_landmarks(self, results):
+        """Extract landmark coordinates from pose detection results."""
+        if not results.pose_landmarks:
+            return None
+            
+        landmarks = {}
+        for i, landmark in enumerate(results.pose_landmarks.landmark):
+            landmarks[i] = (landmark.x, landmark.y, landmark.z)
+        return landmarks
+
+    def calculate_segment_com(self, landmarks: Dict, segment_name: str) -> Optional[Tuple[float, float, float]]:
+        """Calculate the center of mass for a specific body segment."""
+        if segment_name not in self.segment_definitions:
+            return None
+            
+        segment_points = self.segment_definitions[segment_name]
+        valid_points = []
+        
+        # Map MediaPipe landmark indices to segment points
+        landmark_mapping = {
+            'nose': 0, 'left_ear': 3, 'right_ear': 8,
+            'left_shoulder': 11, 'right_shoulder': 12,
+            'left_elbow': 13, 'right_elbow': 14,
+            'left_wrist': 15, 'right_wrist': 16,
+            'left_pinky': 17, 'right_pinky': 18,
+            'left_index': 19, 'right_index': 20,
+            'left_hip': 23, 'right_hip': 24,
+            'left_knee': 25, 'right_knee': 26,
+            'left_ankle': 27, 'right_ankle': 28,
+            'left_heel': 29, 'right_heel': 30,
+            'left_foot_index': 31, 'right_foot_index': 32
+        }
+        
+        # Collect valid landmark coordinates
+        for point_name in segment_points:
+            if point_name in landmark_mapping:
+                idx = landmark_mapping[point_name]
+                if idx in landmarks:
+                    valid_points.append(landmarks[idx])
+        
+        if len(valid_points) < 2:
+            return None
+            
+        # Calculate segment COM based on number of points
+        if len(valid_points) == 2:
+            # For segments with 2 points (most limbs), use COM fraction
+            start_point = np.array(valid_points[0])
+            end_point = np.array(valid_points[1])
+            com_fraction = self.segment_com_fractions[segment_name]
+            com = start_point + com_fraction * (end_point - start_point)
+        else:
+            # For segments with multiple points (head, torso, hands, feet), use centroid
+            com = np.mean(valid_points, axis=0)
+            
+        return tuple(com)
+
+    def calculate_center_of_mass(self, landmarks: Dict) -> Optional[Tuple[float, float, float]]:
+        """Calculate the overall center of mass of the body."""
+        if not landmarks:
+            return None
+            
+        total_mass = 0
+        weighted_com = np.zeros(3)
+        
+        # Calculate COM for each segment
+        for segment_name, mass_fraction in self.segment_masses.items():
+            segment_com = self.calculate_segment_com(landmarks, segment_name)
+            if segment_com is not None:
+                weighted_com += mass_fraction * np.array(segment_com)
+                total_mass += mass_fraction
+        
+        if total_mass > 0:
+            overall_com = weighted_com / total_mass
+            return tuple(overall_com)
+        
+        return None
+
+    def get_pose_data(self, frame):
+        """Get pose detection results and calculate COM."""
+        results = self.detect_pose(frame)
+        landmarks = self.get_landmarks(results)
+        
+        pose_data = {
+            'results': results,
+            'landmarks': landmarks,
+            'com': None
+        }
+        
+        if landmarks:
+            pose_data['com'] = self.calculate_center_of_mass(landmarks)
+            
+        return pose_data 

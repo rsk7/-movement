@@ -18,6 +18,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from pose_detection import PoseDetector
 from video_processor import VideoProcessor, FrameProcessor, create_progress_bar
 from visualization import PoseVisualizer
+from hold_detection import HoldDetector
 
 
 class ClimbingMotionTracker:
@@ -47,11 +48,15 @@ class ClimbingMotionTracker:
         self.video_processor = VideoProcessor()
         self.frame_processor = FrameProcessor()
         self.visualizer = PoseVisualizer()
+        self.hold_detector = HoldDetector()
         
         # Processing options
         self.show_trails = True
         self.show_angles = True
         self.show_velocity = False
+        self.show_holds = False
+        self.show_hold_contacts = False
+        self.show_com = True
         self.trail_length = 30
         
     def process_video(self, input_path: str, output_path: str,
@@ -116,7 +121,7 @@ class ClimbingMotionTracker:
                 processed_frames.append(frame.copy())
                 total_frames += 1
                 
-                # Detect pose in frame
+                # Detect pose in the frame
                 pose_frame = self.pose_detector.detect_pose(frame, frame_number, timestamp)
                 
                 if pose_frame:
@@ -167,6 +172,14 @@ class ClimbingMotionTracker:
                             if j in pose_frame_map:
                                 pose_history.append(pose_frame_map[j])
                     
+                    # Detect holds in the frame
+                    holds = []
+                    hold_contacts = {}
+                    if self.show_holds:
+                        holds = self.hold_detector.detect_holds(frame)
+                        if self.show_hold_contacts:
+                            hold_contacts = self.hold_detector.detect_hold_contacts(pose_frame, holds)
+                    
                     # Get original frame dimensions for correct landmark scaling
                     orig_width = self.video_processor.original_properties['width']
                     orig_height = self.video_processor.original_properties['height']
@@ -182,6 +195,7 @@ class ClimbingMotionTracker:
                             show_trails=self.show_trails,
                             show_angles=self.show_angles,
                             show_velocity=self.show_velocity,
+                            show_com=self.show_com,
                             trail_length=self.trail_length
                         )
                     else:
@@ -194,9 +208,14 @@ class ClimbingMotionTracker:
                             show_trails=self.show_trails,
                             show_angles=self.show_angles,
                             show_velocity=self.show_velocity,
+                            show_com=self.show_com,
                             trail_length=self.trail_length,
                             output_width=orig_width,
-                            output_height=orig_height
+                            output_height=orig_height,
+                            holds=holds,
+                            hold_contacts=hold_contacts,
+                            show_holds=self.show_holds,
+                            show_hold_contacts=self.show_hold_contacts
                         )
                 else:
                     # No pose detected
@@ -233,6 +252,9 @@ class ClimbingMotionTracker:
                                  show_trails: bool = True,
                                  show_angles: bool = True,
                                  show_velocity: bool = False,
+                                 show_holds: bool = False,
+                                 show_hold_contacts: bool = False,
+                                 show_com: bool = True,
                                  trail_length: int = 30):
         """
         Set visualization options.
@@ -241,11 +263,17 @@ class ClimbingMotionTracker:
             show_trails: Whether to show motion trails
             show_angles: Whether to show joint angles
             show_velocity: Whether to show velocity vectors
+            show_holds: Whether to show detected holds
+            show_hold_contacts: Whether to show hold contacts
+            show_com: Whether to show center of mass
             trail_length: Length of motion trails
         """
         self.show_trails = show_trails
         self.show_angles = show_angles
         self.show_velocity = show_velocity
+        self.show_holds = show_holds
+        self.show_hold_contacts = show_hold_contacts
+        self.show_com = show_com
         self.trail_length = trail_length
 
 
@@ -275,6 +303,12 @@ Examples:
                        help='Show joint angles on frame')
     parser.add_argument('--show-velocity', action='store_true',
                        help='Show velocity vectors')
+    parser.add_argument('--show-holds', action='store_true',
+                       help='Show detected climbing holds')
+    parser.add_argument('--show-hold-contacts', action='store_true',
+                       help='Highlight holds being contacted by climber')
+    parser.add_argument('--show-com', action='store_true',
+                       help='Show center of mass')
     parser.add_argument('--trail-length', type=int, default=30,
                        help='Number of frames to show in motion trails (default: 30)')
     
@@ -327,6 +361,9 @@ Examples:
         show_trails=args.show_trails,
         show_angles=args.show_angles,
         show_velocity=args.show_velocity,
+        show_holds=args.show_holds,
+        show_hold_contacts=args.show_hold_contacts,
+        show_com=args.show_com,
         trail_length=args.trail_length
     )
     

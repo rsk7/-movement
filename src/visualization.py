@@ -324,9 +324,14 @@ class PoseVisualizer:
                            show_trails: bool = True,
                            show_angles: bool = True,
                            show_velocity: bool = False,
+                           show_com: bool = True,
                            trail_length: int = 30,
                            output_width: Optional[int] = None,
-                           output_height: Optional[int] = None) -> np.ndarray:
+                           output_height: Optional[int] = None,
+                           holds: Optional[List] = None,
+                           hold_contacts: Optional[Dict] = None,
+                           show_holds: bool = False,
+                           show_hold_contacts: bool = False) -> np.ndarray:
         """
         Create a complete overlay frame with all visualizations.
         
@@ -338,9 +343,14 @@ class PoseVisualizer:
             show_trails: Whether to show motion trails
             show_angles: Whether to show joint angles
             show_velocity: Whether to show velocity vectors
+            show_com: Whether to show center of mass
             trail_length: Length of motion trails
             output_width: Target output width for landmark scaling
             output_height: Target output height for landmark scaling
+            holds: List of detected holds
+            hold_contacts: Dictionary of hold contacts
+            show_holds: Whether to show holds
+            show_hold_contacts: Whether to show hold contacts
             
         Returns:
             Frame with all overlays applied
@@ -357,12 +367,25 @@ class PoseVisualizer:
             if frame.shape[1] != output_width or frame.shape[0] != output_height:
                 overlay_frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_LINEAR)
         
+        # Draw holds first (behind everything else)
+        if show_holds and holds:
+            overlay_frame = self.draw_holds(overlay_frame, holds, show_hold_contacts, hold_contacts)
+        
         # Draw motion trails first (behind skeleton)
         if show_trails and pose_history:
             overlay_frame = self.draw_motion_trails(overlay_frame, pose_history, trail_length)
         
+        # Draw COM trail (behind skeleton)
+        if show_com and pose_history:
+            overlay_frame = self.draw_com_trail(overlay_frame, pose_history, draw_width, draw_height, trail_length)
+        
         # Draw skeleton
-        overlay_frame = self.draw_pose_skeleton(overlay_frame, pose_frame)
+        if pose_frame:
+            overlay_frame = self.draw_pose_skeleton(overlay_frame, pose_frame)
+        
+        # Draw COM position (on top of skeleton)
+        if show_com and pose_frame and pose_frame.com:
+            overlay_frame = self.draw_center_of_mass(overlay_frame, pose_frame.com, draw_width, draw_height)
         
         # Draw joint angles
         if show_angles and angles:
@@ -380,6 +403,7 @@ class PoseVisualizer:
                                  show_trails: bool = True,
                                  show_angles: bool = True,
                                  show_velocity: bool = False,
+                                 show_com: bool = True,
                                  trail_length: int = 30) -> np.ndarray:
         """
         Create a frame with only pose overlays (no background video).
@@ -393,6 +417,7 @@ class PoseVisualizer:
             show_trails: Whether to show motion trails
             show_angles: Whether to show joint angles
             show_velocity: Whether to show velocity vectors
+            show_com: Whether to show center of mass
             trail_length: Length of motion trails
             
         Returns:
@@ -405,8 +430,16 @@ class PoseVisualizer:
         if show_trails and pose_history:
             overlay_frame = self.draw_motion_trails(overlay_frame, pose_history, trail_length)
         
+        # Draw COM trail (behind skeleton)
+        if show_com and pose_history:
+            overlay_frame = self.draw_com_trail(overlay_frame, pose_history, width, height, trail_length)
+        
         # Draw skeleton
         overlay_frame = self.draw_pose_skeleton(overlay_frame, pose_frame)
+        
+        # Draw COM position (on top of skeleton)
+        if show_com and pose_frame and pose_frame.com:
+            overlay_frame = self.draw_center_of_mass(overlay_frame, pose_frame.com, width, height)
         
         # Draw joint angles
         if show_angles and angles:
@@ -416,4 +449,143 @@ class PoseVisualizer:
         if show_velocity and pose_history:
             overlay_frame = self.draw_velocity_vectors(overlay_frame, pose_history)
         
-        return overlay_frame 
+        return overlay_frame
+    
+    def draw_holds(self, frame: np.ndarray, holds: List, 
+                   show_contacts: bool = False, contacts: Optional[Dict] = None) -> np.ndarray:
+        """
+        Draw holds on a frame.
+        
+        Args:
+            frame: Input frame
+            holds: List of detected holds
+            show_contacts: Whether to highlight contacted holds
+            contacts: Dictionary of hold contacts
+            
+        Returns:
+            Frame with holds drawn
+        """
+        result = frame.copy()
+        
+        for i, hold in enumerate(holds):
+            # Choose color based on hold color
+            color_map = {
+                'red': (0, 0, 255),
+                'blue': (255, 0, 0),
+                'yellow': (0, 255, 255),
+                'green': (0, 255, 0),
+                'purple': (255, 0, 255),
+                'orange': (0, 165, 255),
+                'pink': (147, 20, 255)
+            }
+            
+            color = color_map.get(hold.color, (255, 255, 255))
+            
+            # Check if this hold is being contacted
+            is_contacted = False
+            if show_contacts and contacts:
+                for body_part_holds in contacts.values():
+                    for h in body_part_holds:
+                        if tuple(map(int, hold.center)) == tuple(map(int, h.center)) and hold.color == h.color:
+                            is_contacted = True
+                            break
+                    if is_contacted:
+                        break
+            
+            # Draw hold contour
+            thickness = 3 if is_contacted else 2
+            cv2.drawContours(result, [hold.contour], -1, color, thickness)
+            
+            # Draw hold center
+            cv2.circle(result, hold.center, 5, color, -1)
+            
+            # Draw hold info
+            text = f"{hold.color} ({hold.confidence:.2f})"
+            cv2.putText(result, text, 
+                       (hold.center[0] - 20, hold.center[1] - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            
+            # Highlight contacted holds
+            if is_contacted:
+                cv2.circle(result, hold.center, 15, (255, 255, 255), 2)
+        
+        return result
+    
+    def draw_center_of_mass(self, frame: np.ndarray, com: Tuple[float, float, float], 
+                           frame_width: int, frame_height: int, 
+                           color: Tuple[int, int, int] = (0, 255, 255)) -> np.ndarray:
+        """
+        Draw the center of mass on the frame.
+        
+        Args:
+            frame: Input frame
+            com: Center of mass coordinates (x, y, z) in normalized coordinates
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+            color: Color for COM visualization (BGR format)
+            
+        Returns:
+            Frame with COM visualization
+        """
+        if com is None:
+            return frame
+            
+        # Convert normalized coordinates to pixel coordinates
+        x = int(com[0] * frame_width)
+        y = int(com[1] * frame_height)
+        
+        # Draw COM as a filled circle with a cross
+        cv2.circle(frame, (x, y), 8, color, -1)  # Filled circle
+        cv2.circle(frame, (x, y), 12, color, 2)  # Outline circle
+        
+        # Draw cross
+        cv2.line(frame, (x-6, y), (x+6, y), (255, 255, 255), 2)
+        cv2.line(frame, (x, y-6), (x, y+6), (255, 255, 255), 2)
+        
+        # Add "COM" label
+        cv2.putText(frame, "COM", (x+15, y-5), cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.5, color, 1)
+        
+        return frame
+
+    def draw_com_trail(self, frame: np.ndarray, pose_history: List[PoseFrame], 
+                      frame_width: int, frame_height: int,
+                      trail_length: int = 10, 
+                      color: Tuple[int, int, int] = (0, 255, 255)) -> np.ndarray:
+        """
+        Draw a trail of center of mass positions.
+        
+        Args:
+            frame: Input frame
+            pose_history: List of pose frames with COM data
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+            trail_length: Number of previous COM positions to show
+            color: Color for COM trail (BGR format)
+            
+        Returns:
+            Frame with COM trail visualization
+        """
+        if not pose_history:
+            return frame
+            
+        # Get recent COM positions (assuming COM is stored in pose_frame attributes)
+        com_positions = []
+        for pose_frame in reversed(pose_history[-trail_length:]):
+            if pose_frame.com is not None:
+                com = pose_frame.com
+                x = int(com[0] * frame_width)
+                y = int(com[1] * frame_height)
+                com_positions.append((x, y))
+        
+        # Draw trail
+        if len(com_positions) > 1:
+            for i in range(len(com_positions) - 1):
+                # Fade color based on age
+                alpha = 1.0 - (i / len(com_positions))
+                trail_color = tuple(int(c * alpha) for c in color)
+                
+                cv2.line(frame, com_positions[i], com_positions[i+1], 
+                        trail_color, 2)
+        
+        return frame 
