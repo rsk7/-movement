@@ -372,4 +372,48 @@ class PoseVisualizer:
         if show_velocity and pose_history:
             overlay_frame = self.draw_velocity_vectors(overlay_frame, pose_history)
         
+        return overlay_frame
+    
+    def create_overlay_only_frame(self, width: int, height: int, pose_frame: PoseFrame,
+                                 pose_history: Optional[List[PoseFrame]] = None,
+                                 angles: Optional[Dict[str, float]] = None,
+                                 show_trails: bool = True,
+                                 show_angles: bool = True,
+                                 show_velocity: bool = False,
+                                 trail_length: int = 30) -> np.ndarray:
+        """
+        Create a frame with only pose overlays (no background video).
+        
+        Args:
+            width: Frame width
+            height: Frame height
+            pose_frame: Current pose data
+            pose_history: History of pose frames for trails
+            angles: Joint angles to display
+            show_trails: Whether to show motion trails
+            show_angles: Whether to show joint angles
+            show_velocity: Whether to show velocity vectors
+            trail_length: Length of motion trails
+            
+        Returns:
+            Frame with only pose overlays on transparent/black background
+        """
+        # Create a black background frame
+        overlay_frame = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # Draw motion trails first (behind skeleton)
+        if show_trails and pose_history:
+            overlay_frame = self.draw_motion_trails(overlay_frame, pose_history, trail_length)
+        
+        # Draw skeleton
+        overlay_frame = self.draw_pose_skeleton(overlay_frame, pose_frame)
+        
+        # Draw joint angles
+        if show_angles and angles:
+            overlay_frame = self.draw_joint_angles(overlay_frame, pose_frame, angles)
+        
+        # Draw velocity vectors
+        if show_velocity and pose_history:
+            overlay_frame = self.draw_velocity_vectors(overlay_frame, pose_history)
+        
         return overlay_frame 

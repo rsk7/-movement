@@ -8,6 +8,7 @@ import argparse
 import sys
 import os
 import cv2
+import numpy as np
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -56,7 +57,8 @@ class ClimbingMotionTracker:
     def process_video(self, input_path: str, output_path: str,
                      quality_factor: float = 1.0,
                      target_resolution: Optional[Tuple[int, int]] = None,
-                     target_fps: Optional[float] = None) -> bool:
+                     target_fps: Optional[float] = None,
+                     overlay_only: bool = False) -> bool:
         """
         Process a climbing video and generate tracked output.
         
@@ -66,12 +68,17 @@ class ClimbingMotionTracker:
             quality_factor: Quality factor for processing (0.1-1.0)
             target_resolution: Target resolution for processing
             target_fps: Target frame rate for processing
+            overlay_only: If True, output only pose overlays without background video
             
         Returns:
             True if processing successful, False otherwise
         """
         print(f"Processing video: {input_path}")
         print(f"Output will be saved to: {output_path}")
+        if overlay_only:
+            print("Mode: Overlay-only (no background video)")
+        else:
+            print("Mode: Full video with overlays")
         
         # Open input video with preprocessing options
         if not self.video_processor.open_input_video(
@@ -152,31 +159,56 @@ class ClimbingMotionTracker:
                     # Calculate joint angles
                     angles = self.pose_detector.calculate_joint_angles(pose_frame)
                     
-                    # Get pose history for trails
-                    pose_history = self.frame_processor.get_pose_history(i, self.trail_length)
+                    # Get pose history for trails using frame number mapping
+                    pose_history = []
+                    if self.show_trails:
+                        # Get pose history by looking up previous frames in the mapping
+                        for j in range(max(0, i - self.trail_length), i):
+                            if j in pose_frame_map:
+                                pose_history.append(pose_frame_map[j])
                     
                     # Get original frame dimensions for correct landmark scaling
                     orig_width = self.video_processor.original_properties['width']
                     orig_height = self.video_processor.original_properties['height']
                     
-                    # Create overlay frame with original dimensions for correct landmark positioning
-                    overlay_frame = self.visualizer.create_overlay_frame(
-                        frame=frame,
-                        pose_frame=pose_frame,
-                        pose_history=pose_history,
-                        angles=angles,
-                        show_trails=self.show_trails,
-                        show_angles=self.show_angles,
-                        show_velocity=self.show_velocity,
-                        trail_length=self.trail_length,
-                        output_width=orig_width,
-                        output_height=orig_height
-                    )
+                    if overlay_only:
+                        # Create overlay-only frame (no background video)
+                        overlay_frame = self.visualizer.create_overlay_only_frame(
+                            width=orig_width,
+                            height=orig_height,
+                            pose_frame=pose_frame,
+                            pose_history=pose_history,
+                            angles=angles,
+                            show_trails=self.show_trails,
+                            show_angles=self.show_angles,
+                            show_velocity=self.show_velocity,
+                            trail_length=self.trail_length
+                        )
+                    else:
+                        # Create overlay frame with original dimensions for correct landmark positioning
+                        overlay_frame = self.visualizer.create_overlay_frame(
+                            frame=frame,
+                            pose_frame=pose_frame,
+                            pose_history=pose_history,
+                            angles=angles,
+                            show_trails=self.show_trails,
+                            show_angles=self.show_angles,
+                            show_velocity=self.show_velocity,
+                            trail_length=self.trail_length,
+                            output_width=orig_width,
+                            output_height=orig_height
+                        )
                 else:
-                    # No pose detected, just resize the frame to output resolution
+                    # No pose detected
                     orig_width = self.video_processor.original_properties['width']
                     orig_height = self.video_processor.original_properties['height']
-                    overlay_frame = cv2.resize(frame, (orig_width, orig_height), interpolation=cv2.INTER_LINEAR)
+                    
+                    if overlay_only:
+                        # Create blank frame for overlay-only mode
+                        overlay_frame = np.zeros((orig_height, orig_width, 3), dtype=np.uint8)
+                    else:
+                        # No pose detected, just resize the frame to output resolution
+                        overlay_frame = cv2.resize(frame, (orig_width, orig_height), interpolation=cv2.INTER_LINEAR)
                 
                 # Write frame to output
                 self.video_processor.write_frame(overlay_frame)
@@ -266,6 +298,10 @@ Examples:
     parser.add_argument('--target-fps', type=float,
                        help='Target frame rate for processing (default: original fps)')
     
+    # Overlay-only mode
+    parser.add_argument('--overlay-only', action='store_true',
+                       help='Output only pose overlays without background video')
+    
     args = parser.parse_args()
     
     # Validate input file
@@ -298,7 +334,8 @@ Examples:
     success = tracker.process_video(args.input, args.output,
                                    args.quality_factor,
                                    (args.target_width, args.target_height) if args.target_width and args.target_height else None,
-                                   args.target_fps)
+                                   args.target_fps,
+                                   args.overlay_only)
     
     if success:
         print(f"\n✅ Processing completed!")
