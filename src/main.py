@@ -128,9 +128,8 @@ class ClimbingMotionTracker:
                     ret, frame = self.video_processor.input_video.read()
                     
                     if ret:
-                        # Resize frame if needed
-                        if processing_resolution:
-                            frame = cv2.resize(frame, processing_resolution, interpolation=cv2.INTER_AREA)
+                        # Resize frame to match VideoWriter's expected dimensions
+                        frame = cv2.resize(frame, (self.video_processor.width, self.video_processor.height), interpolation=cv2.INTER_AREA)
                         
                         # Calculate joint angles
                         angles = self.pose_detector.calculate_joint_angles(pose_frame)

@@ -7,7 +7,13 @@ import cv2
 import numpy as np
 from typing import List, Tuple, Dict, Optional
 import math
-from .pose_detection import PoseFrame, PoseKeypoint
+from dataclasses import dataclass
+
+# Import pose detection classes
+try:
+    from .pose_detection import PoseFrame, PoseKeypoint
+except ImportError:
+    from pose_detection import PoseFrame, PoseKeypoint
 
 
 class PoseVisualizer:
@@ -178,19 +184,30 @@ class PoseVisualizer:
             
         height, width = frame.shape[:2]
         
+        # Map angle keys to joint names for positioning
+        angle_to_joint = {
+            'left_shoulder_angle': 'left_shoulder',
+            'right_shoulder_angle': 'right_shoulder',
+            'left_elbow_angle': 'left_elbow',
+            'right_elbow_angle': 'right_elbow',
+            'left_hip_angle': 'left_hip',
+            'right_hip_angle': 'right_hip',
+            'left_knee_angle': 'left_knee',
+            'right_knee_angle': 'right_knee',
+        }
+        
         # Draw angles for key joints
-        for joint_name, angle in angles.items():
-            if joint_name in self.angle_joints:
-                # Get the center joint position
-                center_joint = self.angle_joints[joint_name][1]
-                if center_joint in pose_frame.keypoints:
-                    keypoint = pose_frame.keypoints[center_joint]
+        for angle_name, angle_value in angles.items():
+            if angle_name in angle_to_joint:
+                joint_name = angle_to_joint[angle_name]
+                if joint_name in pose_frame.keypoints:
+                    keypoint = pose_frame.keypoints[joint_name]
                     if keypoint.confidence > 0.3:
                         x = int(keypoint.x * width)
                         y = int(keypoint.y * height)
                         
                         # Draw angle text
-                        text = f"{angle:.1f}°"
+                        text = f"{angle_value:.1f}"
                         font = cv2.FONT_HERSHEY_SIMPLEX
                         font_scale = 0.5
                         thickness = 1

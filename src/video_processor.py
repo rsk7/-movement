@@ -93,7 +93,7 @@ class VideoProcessor:
         print(f"Video loaded: {self.width}x{self.height} @ {self.fps:.2f} fps, {self.frame_count} frames")
         return True
     
-    def prepare_output_video(self, output_path: str, codec: str = 'mp4v') -> bool:
+    def prepare_output_video(self, output_path: str, codec: str = 'avc1') -> bool:
         """
         Prepare output video writer.
         
@@ -167,7 +167,10 @@ class VideoProcessor:
         if self.output_video is None:
             return False
             
-        return self.output_video.write(frame)  # type: ignore
+        result = self.output_video.write(frame)  # type: ignore
+        
+        # Silently handle failed frame writes (not critical for video creation)
+        return bool(result)
     
     def close(self):
         """Close video files and release resources."""

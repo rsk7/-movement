@@ -169,9 +169,9 @@ class PoseDetector:
                         
                         smoothed_keypoints[keypoint_name] = PoseKeypoint(
                             x=smoothed_x[len(smoothed_x)//2],
-                            y=smoothed_y[len(smoothed_y)//2],
-                            z=smoothed_z[len(smoothed_z)//2],
-                            confidence=smoothed_conf
+                            y=float(smoothed_y[len(smoothed_y)//2]),
+                            z=float(smoothed_z[len(smoothed_z)//2]),
+                            confidence=float(smoothed_conf)
                         )
                     except:
                         # Fallback to original values if smoothing fails
@@ -252,6 +252,21 @@ class PoseDetector:
             angles['right_hip_angle'] = angle_between_points(
                 pose_frame.keypoints['right_knee'],
                 pose_frame.keypoints['right_hip'],
+                pose_frame.keypoints['right_ankle']
+            )
+        
+        # Calculate knee angles
+        if all(k in pose_frame.keypoints for k in ['left_hip', 'left_knee', 'left_ankle']):
+            angles['left_knee_angle'] = angle_between_points(
+                pose_frame.keypoints['left_hip'],
+                pose_frame.keypoints['left_knee'],
+                pose_frame.keypoints['left_ankle']
+            )
+        
+        if all(k in pose_frame.keypoints for k in ['right_hip', 'right_knee', 'right_ankle']):
+            angles['right_knee_angle'] = angle_between_points(
+                pose_frame.keypoints['right_hip'],
+                pose_frame.keypoints['right_knee'],
                 pose_frame.keypoints['right_ankle']
             )
         

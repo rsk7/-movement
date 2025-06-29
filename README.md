@@ -59,6 +59,40 @@ python video_info.py *.mp4
 
 The video info tool will also provide processing recommendations based on your video's characteristics.
 
+### Video Conversion Tool
+
+Convert .mov files to .mp4 format for better compatibility:
+
+```bash
+# Single file conversion
+python convert_video.py input.mov output.mp4
+
+# High quality conversion
+python convert_video.py input.mov output.mp4 --quality high --codec h265
+
+# Fast conversion for quick processing
+python convert_video.py input.mov output.mp4 --quality fast
+
+# Batch convert all .mov files in a folder
+python convert_video.py --batch input_folder output_folder
+
+# Overwrite existing files
+python convert_video.py --batch input_folder output_folder --overwrite
+```
+
+**Quality Presets:**
+
+- `high`: Best quality, slower encoding (recommended for final output)
+- `medium`: Good balance of quality and speed
+- `low`: Smaller files, faster encoding
+- `fast`: Fastest encoding, lower quality (good for testing)
+
+**Supported Codecs:**
+
+- `h264`: Widely compatible (default)
+- `h265`: Better compression, newer devices
+- `vp9`: Open source, good for web
+
 ### Parameters
 
 - `--input`: Path to input climbing video
