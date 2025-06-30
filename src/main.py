@@ -61,6 +61,7 @@ class ClimbingMotionTracker:
         self.show_com = True
         self.show_rhythm = False
         self.trail_length = 30
+        self.first_frame_background = False  # Use first frame as background for all frames
         
     def process_video(self, input_path: str, output_path: str,
                      quality_factor: float = 1.0,
@@ -150,6 +151,12 @@ class ClimbingMotionTracker:
             print("Generating output video...")
             output_progress = create_progress_bar(len(processed_frames), "Generating output")
             
+            # Capture first frame for background if needed
+            first_frame_background = None
+            if self.first_frame_background and processed_frames:
+                first_frame_background = processed_frames[0].copy()
+                print("Using first frame as background for all frames")
+            
             # Create a mapping of frame numbers to pose frames
             pose_frame_map = {}
             for pose_frame in smoothed_frames:
@@ -158,7 +165,8 @@ class ClimbingMotionTracker:
             print(f"Pose frame mapping: {len(pose_frame_map)} frames mapped")
             
             for i in range(len(processed_frames)):
-                frame = processed_frames[i]
+                # Use first frame as background if enabled, otherwise use current frame
+                frame = first_frame_background if first_frame_background is not None else processed_frames[i]
                 
                 # Get pose frame if available, otherwise use None
                 pose_frame = pose_frame_map.get(i)
@@ -273,7 +281,8 @@ class ClimbingMotionTracker:
                                  show_hold_contacts: bool = False,
                                  show_com: bool = True,
                                  show_rhythm: bool = False,
-                                 trail_length: int = 30):
+                                 trail_length: int = 30,
+                                 first_frame_background: bool = False):
         """
         Set visualization options.
         
@@ -286,6 +295,7 @@ class ClimbingMotionTracker:
             show_com: Whether to show center of mass
             show_rhythm: Whether to show rhythm analysis
             trail_length: Length of motion trails
+            first_frame_background: Whether to use first frame as background for all frames
         """
         self.show_trails = show_trails
         self.show_angles = show_angles
@@ -295,6 +305,7 @@ class ClimbingMotionTracker:
         self.show_com = show_com
         self.show_rhythm = show_rhythm
         self.trail_length = trail_length
+        self.first_frame_background = first_frame_background
 
 
 def main():
@@ -357,6 +368,8 @@ Examples:
     # Overlay-only mode
     parser.add_argument('--overlay-only', action='store_true',
                        help='Output only pose overlays without background video')
+    parser.add_argument('--first-frame-background', action='store_true',
+                       help='Use first frame as background for all frames (static background)')
     
     args = parser.parse_args()
     
@@ -387,7 +400,8 @@ Examples:
         show_hold_contacts=args.show_hold_contacts,
         show_com=args.show_com,
         show_rhythm=args.show_rhythm,
-        trail_length=args.trail_length
+        trail_length=args.trail_length,
+        first_frame_background=args.first_frame_background
     )
     
     # Process video
