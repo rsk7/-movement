@@ -79,7 +79,7 @@ class PoseVisualizer:
     
     def draw_pose_skeleton(self, frame: np.ndarray, pose_frame: PoseFrame) -> np.ndarray:
         """
-        Draw skeleton overlay on frame.
+        Draw skeleton overlay on frame with enhanced visual styling.
         
         Args:
             frame: Input frame
@@ -93,7 +93,7 @@ class PoseVisualizer:
             
         height, width = frame.shape[:2]
         
-        # Draw skeleton connections
+        # Draw skeleton connections with gradient and confidence-based styling
         for connection in self.skeleton_connections:
             joint1_name, joint2_name = connection
             
@@ -109,14 +109,46 @@ class PoseVisualizer:
                 
                 # Only draw if both points are visible
                 if joint1.confidence > 0.3 and joint2.confidence > 0.3:
-                    cv2.line(frame, (x1, y1), (x2, y2), self.skeleton_color, self.line_thickness)
+                    # Calculate confidence-based color and thickness
+                    avg_confidence = (joint1.confidence + joint2.confidence) / 2
+                    color_intensity = int(255 * avg_confidence)
+                    
+                    # Create gradient effect - brighter for higher confidence
+                    line_color = (0, color_intensity, 0)  # Green with varying intensity
+                    line_thickness = max(1, int(self.line_thickness * avg_confidence))
+                    
+                    # Draw main line
+                    cv2.line(frame, (x1, y1), (x2, y2), line_color, line_thickness)
+                    
+                    # Add subtle glow effect for high confidence connections
+                    if avg_confidence > 0.7:
+                        glow_color = (0, min(255, color_intensity + 50), 0)
+                        cv2.line(frame, (x1, y1), (x2, y2), glow_color, line_thickness + 1)
         
-        # Draw joint markers
+        # Draw joint markers with enhanced styling
         for joint_name, keypoint in pose_frame.keypoints.items():
             if keypoint.confidence > 0.3:
                 x = int(keypoint.x * width)
                 y = int(keypoint.y * height)
-                cv2.circle(frame, (x, y), self.joint_radius, self.joint_color, -1)
+                
+                # Confidence-based joint styling
+                confidence = keypoint.confidence
+                joint_size = int(self.joint_radius * confidence)
+                color_intensity = int(255 * confidence)
+                
+                # Create gradient joint color (red with varying intensity)
+                joint_color = (0, 0, color_intensity)
+                
+                # Draw outer glow for high confidence joints
+                if confidence > 0.7:
+                    glow_color = (0, 0, min(255, color_intensity + 30))
+                    cv2.circle(frame, (x, y), joint_size + 2, glow_color, -1)
+                
+                # Draw main joint
+                cv2.circle(frame, (x, y), joint_size, joint_color, -1)
+                
+                # Add white center for contrast
+                cv2.circle(frame, (x, y), max(1, joint_size // 2), (255, 255, 255), -1)
         
         return frame
     
@@ -224,7 +256,7 @@ class PoseVisualizer:
     def draw_joint_angles(self, frame: np.ndarray, pose_frame: PoseFrame, 
                          angles: Dict[str, float]) -> np.ndarray:
         """
-        Draw joint angles on frame.
+        Draw joint angles on frame, positioned away from joints to avoid obscuring skeleton.
         
         Args:
             frame: Input frame
@@ -239,47 +271,61 @@ class PoseVisualizer:
             
         height, width = frame.shape[:2]
         
-        # Map angle keys to joint names for positioning
-        angle_to_joint = {
-            'left_shoulder_angle': 'left_shoulder',
-            'right_shoulder_angle': 'right_shoulder',
-            'left_elbow_angle': 'left_elbow',
-            'right_elbow_angle': 'right_elbow',
-            'left_hip_angle': 'left_hip',
-            'right_hip_angle': 'right_hip',
-            'left_knee_angle': 'left_knee',
-            'right_knee_angle': 'right_knee',
+        # Map angle keys to joint names and offset directions
+        angle_to_joint_offset = {
+            'left_shoulder_angle': ('left_shoulder', (-50, -30)),  # Up and left
+            'right_shoulder_angle': ('right_shoulder', (50, -30)),  # Up and right
+            'left_elbow_angle': ('left_elbow', (-40, 0)),  # Left
+            'right_elbow_angle': ('right_elbow', (40, 0)),  # Right
+            'left_hip_angle': ('left_hip', (-50, 30)),  # Down and left
+            'right_hip_angle': ('right_hip', (50, 30)),  # Down and right
+            'left_knee_angle': ('left_knee', (-40, 20)),  # Left and down
+            'right_knee_angle': ('right_knee', (40, 20)),  # Right and down
         }
         
         # Draw angles for key joints
         for angle_name, angle_value in angles.items():
-            if angle_name in angle_to_joint:
-                joint_name = angle_to_joint[angle_name]
+            if angle_name in angle_to_joint_offset:
+                joint_name, (offset_x, offset_y) = angle_to_joint_offset[angle_name]
                 if joint_name in pose_frame.keypoints:
                     keypoint = pose_frame.keypoints[joint_name]
                     if keypoint.confidence > 0.3:
-                        x = int(keypoint.x * width)
-                        y = int(keypoint.y * height)
+                        # Base position at joint
+                        base_x = int(keypoint.x * width)
+                        base_y = int(keypoint.y * height)
+                        
+                        # Calculate offset position for text
+                        text_x = base_x + offset_x
+                        text_y = base_y + offset_y
+                        
+                        # Ensure text stays within frame bounds
+                        text_x = max(20, min(width - 20, text_x))
+                        text_y = max(20, min(height - 20, text_y))
                         
                         # Draw angle text
                         text = f"{angle_value:.1f}"
                         font = cv2.FONT_HERSHEY_SIMPLEX
-                        font_scale = 0.5
+                        font_scale = 0.4
                         thickness = 1
                         
                         # Get text size for background
                         (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
                         
-                        # Draw background rectangle
+                        # Draw background rectangle with rounded corners effect
+                        padding = 3
                         cv2.rectangle(frame, 
-                                    (x - text_width//2 - 2, y - text_height - 2),
-                                    (x + text_width//2 + 2, y + baseline + 2),
+                                    (text_x - text_width//2 - padding, text_y - text_height - padding),
+                                    (text_x + text_width//2 + padding, text_y + baseline + padding),
                                     (0, 0, 0), -1)
                         
                         # Draw text
                         cv2.putText(frame, text, 
-                                  (x - text_width//2, y), 
+                                  (text_x - text_width//2, text_y), 
                                   font, font_scale, self.text_color, thickness)
+                        
+                        # Draw a small line connecting joint to text (optional)
+                        line_color = (100, 100, 100)  # Gray line
+                        cv2.line(frame, (base_x, base_y), (text_x, text_y), line_color, 1)
         
         return frame
     
@@ -387,7 +433,9 @@ class PoseVisualizer:
                            hold_contacts: Optional[Dict] = None,
                            show_holds: bool = False,
                            show_hold_contacts: bool = False,
-                           show_rhythm: bool = False) -> np.ndarray:
+                           show_rhythm: bool = False,
+                           show_motion_blur: bool = False,
+                           show_energy: bool = False) -> np.ndarray:
         """
         Create a complete overlay frame with all visualizations.
         
@@ -408,6 +456,8 @@ class PoseVisualizer:
             show_holds: Whether to show holds
             show_hold_contacts: Whether to show hold contacts
             show_rhythm: Whether to show rhythm information
+            show_motion_blur: Whether to show motion blur effect
+            show_energy: Whether to show energy visualization
             
         Returns:
             Frame with all overlays applied
@@ -460,6 +510,14 @@ class PoseVisualizer:
             
             overlay_frame = self.draw_rhythm_info(overlay_frame, rhythm_summary, draw_width, draw_height)
             overlay_frame = self.draw_rhythm_events(overlay_frame, rhythm_events, draw_width, draw_height)
+        
+        # Draw motion blur effect
+        if show_motion_blur and pose_history:
+            overlay_frame = self.draw_motion_blur(overlay_frame, pose_history)
+        
+        # Draw energy visualization
+        if show_energy and pose_history:
+            overlay_frame = self.draw_energy_visualization(overlay_frame, pose_history)
         
         return overlay_frame
     
@@ -795,5 +853,126 @@ class PoseVisualizer:
             label = event.event_type.upper()
             cv2.putText(frame, label, (x + 15, y - 5), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        
+        return frame
+    
+    def draw_motion_blur(self, frame: np.ndarray, pose_history: List[PoseFrame], 
+                        blur_length: int = 5) -> np.ndarray:
+        """
+        Draw motion blur effect for moving joints.
+        
+        Args:
+            frame: Input frame
+            pose_history: List of recent pose frames
+            blur_length: Number of frames to use for blur effect
+            
+        Returns:
+            Frame with motion blur effect
+        """
+        if not pose_history or len(pose_history) < 2:
+            return frame
+            
+        height, width = frame.shape[:2]
+        
+        # Get recent frames for blur effect
+        recent_frames = pose_history[-blur_length:]
+        
+        # Draw motion blur for key joints
+        key_joints = ['left_wrist', 'right_wrist', 'left_ankle', 'right_ankle', 'nose']
+        
+        for joint_name in key_joints:
+            points = []
+            
+            # Collect points for this joint
+            for pose_frame in recent_frames:
+                if joint_name in pose_frame.keypoints:
+                    keypoint = pose_frame.keypoints[joint_name]
+                    if keypoint.confidence > 0.3:
+                        x = int(keypoint.x * width)
+                        y = int(keypoint.y * height)
+                        points.append((x, y, keypoint.confidence))
+            
+            # Draw motion blur trail
+            if len(points) > 1:
+                for i in range(len(points) - 1):
+                    # Calculate alpha based on position in trail
+                    alpha = i / len(points)
+                    
+                    # Create blur color (cyan with fading)
+                    blur_color = (int(255 * alpha), int(255 * alpha), int(255 * alpha))
+                    blur_thickness = max(1, int(3 * alpha))
+                    
+                    # Draw blur line
+                    cv2.line(frame, (points[i][0], points[i][1]), 
+                            (points[i+1][0], points[i+1][1]), 
+                            blur_color, blur_thickness)
+        
+        return frame
+    
+    def draw_energy_visualization(self, frame: np.ndarray, pose_history: List[PoseFrame]) -> np.ndarray:
+        """
+        Draw energy/force visualization showing movement intensity.
+        
+        Args:
+            frame: Input frame
+            pose_history: List of recent pose frames
+            
+        Returns:
+            Frame with energy visualization
+        """
+        if not pose_history or len(pose_history) < 3:
+            return frame
+            
+        height, width = frame.shape[:2]
+        
+        # Calculate movement energy for key joints
+        key_joints = ['left_wrist', 'right_wrist', 'left_ankle', 'right_ankle']
+        
+        for joint_name in key_joints:
+            if len(pose_history) >= 3:
+                current = pose_history[-1]
+                previous = pose_history[-2]
+                
+                if (joint_name in current.keypoints and 
+                    joint_name in previous.keypoints):
+                    
+                    curr_kp = current.keypoints[joint_name]
+                    prev_kp = previous.keypoints[joint_name]
+                    
+                    if curr_kp.confidence > 0.3 and prev_kp.confidence > 0.3:
+                        # Calculate movement velocity
+                        dx = (curr_kp.x - prev_kp.x) * width
+                        dy = (curr_kp.y - prev_kp.y) * height
+                        velocity = np.sqrt(dx**2 + dy**2)
+                        
+                        # Lower threshold for more visible particles
+                        if velocity > 2:  # Reduced threshold from 5 to 2
+                            x = int(curr_kp.x * width)
+                            y = int(curr_kp.y * height)
+                            
+                            # Energy intensity based on velocity
+                            energy_intensity = min(255, int(velocity * 20))  # Increased multiplier
+                            
+                            # Draw energy particles with better visibility
+                            particle_color = (255, energy_intensity, 0)  # Bright orange/red
+                            
+                            # Draw multiple particles in a smaller radius for better visibility
+                            num_particles = min(10, int(velocity / 1.5))  # More particles, smaller radius
+                            for _ in range(num_particles):
+                                offset_x = np.random.randint(-3, 4)  # Smaller radius
+                                offset_y = np.random.randint(-3, 4)  # Smaller radius
+                                particle_x = x + offset_x
+                                particle_y = y + offset_y
+                                
+                                # Ensure particles stay within frame
+                                particle_x = max(0, min(width - 1, particle_x))
+                                particle_y = max(0, min(height - 1, particle_y))
+                                
+                                # Draw larger particles for better visibility
+                                particle_size = max(2, min(6, int(velocity / 2)))  # Bigger particles (2-6 pixels)
+                                cv2.circle(frame, (particle_x, particle_y), particle_size, particle_color, -1)
+                                
+                                # Add white center for contrast
+                                cv2.circle(frame, (particle_x, particle_y), max(1, particle_size // 2), (255, 255, 255), -1)
         
         return frame 
