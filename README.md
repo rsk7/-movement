@@ -2,13 +2,6 @@
 
 A computer vision application that analyzes climbing videos and superimposes motion tracking visualizations to help climbers analyze their technique and movement patterns.
 
-## Features
-
-- **Pose Detection**: Tracks key body points (shoulders, elbows, wrists, hips, knees, ankles)
-- **Motion Visualization**: Superimposes skeleton overlays and motion trails on climbing videos
-- **Performance Analysis**: Calculates movement metrics and joint angles
-- **Video Processing**: Maintains original video quality while adding tracking data
-
 ## Installation
 
 1. Clone this repository
@@ -35,8 +28,8 @@ python src/main.py \
     --show-trails \
     --show-angles \
     --trail-length 30 \
-    --quality-factor 0.5 \
-    --target-fps 30
+    --quality-factor 0.1 \
+    --show-energy
 ```
 
 ### Video Information Tool
@@ -177,10 +170,3 @@ python src/main.py --input large_video.mp4 --output tracked.mp4 --quality-factor
 - **Quality Factor 0.3**: 30% resolution, ~10x faster processing
 - **Target FPS 30**: Good balance for most climbing analysis
 - **Target FPS 15**: Faster processing, still captures key movements
-
-## Future Enhancements
-
-- Real-time processing for live climbing sessions
-- Route analysis and hold sequence tracking
-- Performance comparison between multiple attempts
-- Integration with climbing apps and databases
