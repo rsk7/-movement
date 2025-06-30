@@ -123,7 +123,7 @@ class PoseVisualizer:
     def draw_motion_trails(self, frame: np.ndarray, pose_history: List[PoseFrame], 
                           trail_length: int = 30, fade_factor: float = 0.8) -> np.ndarray:
         """
-        Draw motion trails showing recent movement history.
+        Draw motion trails showing recent movement history with smoothing.
         
         Args:
             frame: Input frame
@@ -157,14 +157,69 @@ class PoseVisualizer:
                         y = int(keypoint.y * height)
                         points.append((x, y))
             
-            # Draw trail with fading
-            if len(points) > 1:
-                for i in range(len(points) - 1):
-                    alpha = (i / len(points)) * fade_factor
+            # Draw smoothed trail with fading
+            if len(points) > 2:
+                # Apply smoothing using spline interpolation
+                smoothed_points = self._smooth_trail_points(points)
+                
+                # Draw smoothed trail
+                for i in range(len(smoothed_points) - 1):
+                    alpha = (i / len(smoothed_points)) * fade_factor
                     color = tuple(int(c * alpha) for c in self.trail_color)
-                    cv2.line(frame, points[i], points[i + 1], color, max(1, self.line_thickness // 2))
+                    thickness = max(1, self.line_thickness // 2)
+                    
+                    # Draw line segment
+                    cv2.line(frame, smoothed_points[i], smoothed_points[i + 1], 
+                            color, thickness)
+            elif len(points) == 2:
+                # Simple line for just 2 points
+                alpha = fade_factor
+                color = tuple(int(c * alpha) for c in self.trail_color)
+                cv2.line(frame, points[0], points[1], color, max(1, self.line_thickness // 2))
         
         return frame
+    
+    def _smooth_trail_points(self, points: List[Tuple[int, int]], 
+                           smoothing_factor: float = 0.3) -> List[Tuple[int, int]]:
+        """
+        Smooth trail points using simple moving average.
+        
+        Args:
+            points: List of (x, y) coordinate tuples
+            smoothing_factor: Smoothing factor (0-1, higher = smoother)
+            
+        Returns:
+            List of smoothed (x, y) coordinate tuples
+        """
+        if len(points) < 3:
+            return points
+        
+        # Use simple moving average smoothing
+        return self._simple_smooth_points(points)
+    
+    def _simple_smooth_points(self, points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+        """
+        Simple smoothing using moving average.
+        
+        Args:
+            points: List of (x, y) coordinate tuples
+            
+        Returns:
+            List of smoothed (x, y) coordinate tuples
+        """
+        if len(points) < 3:
+            return points
+        
+        smoothed = [points[0]]  # Keep first point
+        
+        # Apply moving average smoothing
+        for i in range(1, len(points) - 1):
+            x_avg = (points[i-1][0] + points[i][0] + points[i+1][0]) // 3
+            y_avg = (points[i-1][1] + points[i][1] + points[i+1][1]) // 3
+            smoothed.append((x_avg, y_avg))
+        
+        smoothed.append(points[-1])  # Keep last point
+        return smoothed
     
     def draw_joint_angles(self, frame: np.ndarray, pose_frame: PoseFrame, 
                          angles: Dict[str, float]) -> np.ndarray:
@@ -573,10 +628,10 @@ class PoseVisualizer:
 
     def draw_com_trail(self, frame: np.ndarray, pose_history: List[PoseFrame], 
                       frame_width: int, frame_height: int,
-                      trail_length: int = 10, 
+                      trail_length: int = 30, 
                       color: Tuple[int, int, int] = (0, 255, 255)) -> np.ndarray:
         """
-        Draw a trail of center of mass positions.
+        Draw a trail of center of mass positions with smoothing.
         
         Args:
             frame: Input frame
@@ -601,15 +656,25 @@ class PoseVisualizer:
                 y = int(com[1] * frame_height)
                 com_positions.append((x, y))
         
-        # Draw trail
-        if len(com_positions) > 1:
-            for i in range(len(com_positions) - 1):
+        # Draw smoothed trail
+        if len(com_positions) > 2:
+            # Apply smoothing
+            smoothed_points = self._simple_smooth_points(com_positions)
+            
+            # Draw smoothed trail with fading
+            for i in range(len(smoothed_points) - 1):
                 # Fade color based on age
-                alpha = 1.0 - (i / len(com_positions))
+                alpha = 1.0 - (i / len(smoothed_points))
                 trail_color = tuple(int(c * alpha) for c in color)
                 
-                cv2.line(frame, com_positions[i], com_positions[i+1], 
+                cv2.line(frame, smoothed_points[i], smoothed_points[i+1], 
                         trail_color, 2)
+        elif len(com_positions) == 2:
+            # Simple line for just 2 points
+            alpha = 0.5
+            trail_color = tuple(int(c * alpha) for c in color)
+            cv2.line(frame, com_positions[0], com_positions[1], 
+                    trail_color, 2)
         
         return frame
     
