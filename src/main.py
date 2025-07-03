@@ -15,11 +15,17 @@ from typing import Optional, Tuple, List, Dict
 # Add src directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from pose_detection import PoseDetector
-from video_processor import VideoProcessor, FrameProcessor, create_progress_bar
-from visualization import PoseVisualizer
-from hold_detection import HoldDetector
-from rhythm_detection import RhythmDetector
+from src.pose_detection import PoseDetector
+from src.video_processor import VideoProcessor, FrameProcessor, create_progress_bar
+from src.visualization import PoseVisualizer
+from src.hold_detection import HoldDetector
+from src.rhythm_detection import RhythmDetector
+
+# Add YOLOv8 import
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
 
 
 class ClimbingMotionTracker:
@@ -70,7 +76,9 @@ class ClimbingMotionTracker:
                      quality_factor: float = 1.0,
                      target_resolution: Optional[Tuple[int, int]] = None,
                      target_fps: Optional[float] = None,
-                     overlay_only: bool = False) -> bool:
+                     overlay_only: bool = False,
+                     focused_pose: bool = False,
+                     ghost_overlay: bool = False) -> bool:
         """
         Process a climbing video and generate tracked output.
         
@@ -81,17 +89,34 @@ class ClimbingMotionTracker:
             target_resolution: Target resolution for processing
             target_fps: Target frame rate for processing
             overlay_only: If True, output only pose overlays without background video
-            
-        Returns:
-            True if processing successful, False otherwise
+            focused_pose: If True, use segmentation mask to focus pose estimation
+            ghost_overlay: If True, create a ghost overlay visualization
         """
         print(f"Processing video: {input_path}")
         print(f"Output will be saved to: {output_path}")
+        if focused_pose:
+            print("[Option] Focused pose estimation enabled (using segmentation mask)")
+        if ghost_overlay:
+            print("[Option] Ghost overlay visualization enabled")
         if overlay_only:
             print("Mode: Overlay-only (no background video)")
         else:
             print("Mode: Full video with overlays")
         
+        # Load YOLOv8 segmentation model if needed
+        yolo_model = None
+        if (focused_pose or ghost_overlay):
+            if YOLO is None:
+                print("ERROR: ultralytics package not installed. Please install with 'pip install ultralytics'.")
+                return False
+            print("Loading YOLOv8 segmentation model (yolov8n-seg.pt)...")
+            yolo_model = YOLO('yolov8n-seg.pt')
+
+        # For ghost overlay, keep a buffer of recent masks
+        ghost_mask_buffer = []
+        ghost_buffer_size = 10  # Number of frames to show in ghost overlay
+        ghost_colors = [(255,0,0,80), (0,255,0,80), (0,0,255,80), (255,255,0,80), (0,255,255,80), (255,0,255,80)]
+
         # Open input video with preprocessing options
         if not self.video_processor.open_input_video(
             input_path, 
@@ -122,22 +147,11 @@ class ClimbingMotionTracker:
             
             pose_detected_count = 0
             total_frames = 0
+            first_frame_background = None
             
             for frame, frame_number, timestamp in self.video_processor.get_frames(processing_resolution):
-                # Store processed frame for output generation
                 processed_frames.append(frame.copy())
                 total_frames += 1
-                
-                # Detect pose in the frame
-                pose_frame = self.pose_detector.detect_pose(frame, frame_number, timestamp)
-                
-                if pose_frame:
-                    pose_frames.append(pose_frame)
-                    self.frame_processor.add_pose_frame(pose_frame)
-                    pose_detected_count += 1
-                
-                # Update progress
-                progress_bar.update(1)
             
             progress_bar.close()
             
@@ -155,7 +169,6 @@ class ClimbingMotionTracker:
             output_progress = create_progress_bar(len(processed_frames), "Generating output")
             
             # Capture first frame for background if needed
-            first_frame_background = None
             if self.first_frame_background and processed_frames:
                 first_frame_background = processed_frames[0].copy()
                 print("Using first frame as background for all frames")
@@ -168,109 +181,125 @@ class ClimbingMotionTracker:
             print(f"Pose frame mapping: {len(pose_frame_map)} frames mapped")
             
             for i in range(len(processed_frames)):
-                # Use first frame as background if enabled, otherwise use current frame
                 frame = first_frame_background if first_frame_background is not None else processed_frames[i]
+                frame_for_pose = frame.copy()
+                climber_mask = None
                 
-                # Get pose frame if available, otherwise use None
-                pose_frame = pose_frame_map.get(i)
+                # --- Focused pose estimation ---
+                if (focused_pose or ghost_overlay) and yolo_model is not None:
+                    results = yolo_model(frame)
+                    best_mask = None
+                    best_area = 0
+                    for j, cls in enumerate(results[0].boxes.cls):
+                        if int(cls) == 0:  # 0 is 'person' in COCO
+                            mask = results[0].masks.data[j].cpu().numpy()
+                            area = mask.sum()
+                            if area > best_area:
+                                best_area = area
+                                best_mask = mask
+                    if best_mask is not None:
+                        climber_mask = (best_mask > 0.5).astype(np.uint8)
                 
-                if pose_frame:
-                    # Calculate joint angles
-                    angles = self.pose_detector.calculate_joint_angles(pose_frame)
-                    
-                    # Add frame to rhythm detector if COM is available
-                    if self.show_rhythm and pose_frame.com is not None:
-                        timestamp = i / video_info['fps']
-                        self.rhythm_detector.add_frame(timestamp, pose_frame)
-                        
-                        # Get rhythm data for visualization
-                        rhythm_summary = self.rhythm_detector.get_current_rhythm_summary()
-                        rhythm_events = self.rhythm_detector.rhythm_events[-10:]  # Last 10 events
-                        
-                        pose_frame.rhythm_summary = rhythm_summary
-                        pose_frame.rhythm_events = rhythm_events
-                    
-                    # Get pose history for trails using frame number mapping
-                    pose_history = []
-                    if self.show_trails:
-                        # Get pose history by looking up previous frames in the mapping
-                        for j in range(max(0, i - self.trail_length), i):
-                            if j in pose_frame_map:
-                                pose_history.append(pose_frame_map[j])
-                    
-                    # Detect holds in the frame
-                    holds = []
-                    hold_contacts = {}
-                    if self.show_holds:
-                        holds = self.hold_detector.detect_holds(frame)
-                        if self.show_hold_contacts:
-                            hold_contacts = self.hold_detector.detect_hold_contacts(pose_frame, holds)
-                    
-                    # Get original frame dimensions for correct landmark scaling
-                    orig_width = self.video_processor.original_properties['width']
-                    orig_height = self.video_processor.original_properties['height']
-                    
-                    if overlay_only:
-                        # Create overlay-only frame (no background video)
-                        overlay_frame = self.visualizer.create_overlay_only_frame(
-                            width=orig_width,
-                            height=orig_height,
-                            pose_frame=pose_frame,
-                            pose_history=pose_history,
-                            angles=angles,
-                            show_trails=self.show_trails,
-                            show_angles=self.show_angles,
-                            show_velocity=self.show_velocity,
-                            show_com=self.show_com,
-                            show_rhythm=self.show_rhythm,
-                            trail_length=self.trail_length
-                        )
-                    else:
-                        # Create overlay frame with original dimensions for correct landmark positioning
-                        overlay_frame = self.visualizer.create_overlay_frame(
-                            frame=frame,
-                            pose_frame=pose_frame,
-                            pose_history=pose_history,
-                            angles=angles,
-                            show_trails=self.show_trails,
-                            show_angles=self.show_angles,
-                            show_velocity=self.show_velocity,
-                            show_com=self.show_com,
-                            show_rhythm=self.show_rhythm,
-                            trail_length=self.trail_length,
-                            output_width=orig_width,
-                            output_height=orig_height,
-                            holds=holds,
-                            hold_contacts=hold_contacts,
-                            show_holds=self.show_holds,
-                            show_hold_contacts=self.show_hold_contacts,
-                            show_motion_blur=self.show_motion_blur,
-                            show_energy=self.show_energy
-                        )
+                if focused_pose and climber_mask is not None:
+                    for c in range(3):
+                        frame_for_pose[:,:,c] = frame_for_pose[:,:,c] * climber_mask
+                
+                # Detect pose in the frame (on masked or original frame)
+                pose_frame = self.pose_detector.detect_pose(frame_for_pose, i, i / video_info['fps'])
+                
+                if pose_frame is not None:
+                    pose_frames.append(pose_frame)
+                    self.frame_processor.add_pose_frame(pose_frame)
+                    pose_detected_count += 1
+                
+                # Get pose history for trails using frame number mapping
+                pose_history = []
+                if self.show_trails:
+                    for j in range(max(0, i - self.trail_length), i):
+                        if j in pose_frame_map:
+                            pose_history.append(pose_frame_map[j])
+                
+                # Detect holds in the frame
+                holds = []
+                hold_contacts = {}
+                if self.show_holds:
+                    holds = self.hold_detector.detect_holds(frame)
+                    if self.show_hold_contacts and pose_frame is not None:
+                        hold_contacts = self.hold_detector.detect_hold_contacts(pose_frame, holds)
+                
+                # Get original frame dimensions for correct landmark scaling
+                orig_width = self.video_processor.original_properties['width']
+                orig_height = self.video_processor.original_properties['height']
+                
+                # --- Ghost overlay ---
+                output_frame = frame.copy()
+                if ghost_overlay and climber_mask is not None:
+                    ghost_mask_buffer.append((climber_mask.copy(), output_frame.copy()))
+                    if len(ghost_mask_buffer) > ghost_buffer_size:
+                        ghost_mask_buffer.pop(0)
+                    for idx, (mask, base_img) in enumerate(ghost_mask_buffer):
+                        color = ghost_colors[idx % len(ghost_colors)]
+                        overlay = np.zeros_like(output_frame, dtype=np.uint8)
+                        for c in range(3):
+                            overlay[:,:,c] = color[c]
+                        alpha = color[3] / 255.0
+                        mask3 = np.stack([mask]*3, axis=-1)
+                        output_frame = np.where(mask3, cv2.addWeighted(output_frame, 1-alpha, overlay, alpha, 0), output_frame)
+                
+                vis_frame = output_frame if ghost_overlay else frame
+                
+                # Calculate joint angles
+                angles = self.pose_detector.calculate_joint_angles(pose_frame) if pose_frame is not None else None
+                
+                # Rhythm analysis
+                if self.show_rhythm and pose_frame is not None and getattr(pose_frame, 'com', None) is not None:
+                    timestamp = i / video_info['fps']
+                    self.rhythm_detector.add_frame(timestamp, pose_frame)
+                    rhythm_summary = self.rhythm_detector.get_current_rhythm_summary()
+                    rhythm_events = self.rhythm_detector.rhythm_events[-10:]
+                    setattr(pose_frame, 'rhythm_summary', rhythm_summary)
+                    setattr(pose_frame, 'rhythm_events', rhythm_events)
+                
+                # Holds visualization
+                if self.show_holds:
+                    holds = self.hold_detector.detect_holds(vis_frame)
+                    if self.show_hold_contacts and pose_frame is not None:
+                        hold_contacts = self.hold_detector.detect_hold_contacts(pose_frame, holds)
+                
+                # Create overlay frame
+                if pose_frame is not None:
+                    overlay_frame = self.visualizer.create_overlay_frame(
+                        frame=vis_frame,
+                        pose_frame=pose_frame,
+                        pose_history=pose_history,
+                        angles=angles,
+                        show_trails=self.show_trails,
+                        show_angles=self.show_angles,
+                        show_velocity=self.show_velocity,
+                        show_com=self.show_com,
+                        show_rhythm=self.show_rhythm,
+                        show_holds=self.show_holds,
+                        show_hold_contacts=self.show_hold_contacts,
+                        holds=holds,
+                        hold_contacts=hold_contacts,
+                        show_motion_blur=self.show_motion_blur,
+                        show_energy=self.show_energy
+                    )
                 else:
-                    # No pose detected
-                    orig_width = self.video_processor.original_properties['width']
-                    orig_height = self.video_processor.original_properties['height']
-                    
                     if overlay_only:
-                        # Create blank frame for overlay-only mode
                         overlay_frame = np.zeros((orig_height, orig_width, 3), dtype=np.uint8)
                     else:
-                        # No pose detected, just resize the frame to output resolution
                         overlay_frame = cv2.resize(frame, (orig_width, orig_height), interpolation=cv2.INTER_LINEAR)
                 
                 # Write frame to output
                 self.video_processor.write_frame(overlay_frame)
-                
                 output_progress.update(1)
-            
             output_progress.close()
-            
-            print("Processing completed successfully!")
+            print(f"\n✅ Processing completed!")
+            print(f"Output video saved to: {output_path}")
             return True
-            
         except Exception as e:
-            print(f"Error during processing: {e}")
+            print(f"❌ Error during processing: {e}")
             return False
         
         finally:
@@ -667,6 +696,12 @@ Examples:
     parser.add_argument('--event-types', nargs='+', choices=['reach', 'pause', 'steady'],
                        help='Event types to include (e.g., reach pause)')
     
+    # New options
+    parser.add_argument('--focused-pose', action='store_true',
+                       help='Use segmentation mask to focus pose estimation on the climber')
+    parser.add_argument('--ghost-overlay', action='store_true',
+                       help='Create a ghost overlay visualization of the climber over time')
+    
     args = parser.parse_args()
     
     # Validate input file
@@ -717,7 +752,9 @@ Examples:
                                        args.quality_factor,
                                        (args.target_width, args.target_height) if args.target_width and args.target_height else None,
                                        args.target_fps,
-                                       args.overlay_only)
+                                       args.overlay_only,
+                                       focused_pose=args.focused_pose,
+                                       ghost_overlay=args.ghost_overlay)
     
     if success:
         print(f"\n✅ Processing completed!")

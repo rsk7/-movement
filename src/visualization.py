@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 # Import pose detection classes
 try:
-    from .pose_detection import PoseFrame, PoseKeypoint
+    from src.pose_detection import PoseFrame, PoseKeypoint
 except ImportError:
     from pose_detection import PoseFrame, PoseKeypoint
 

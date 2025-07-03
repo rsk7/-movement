@@ -10,7 +10,6 @@ __author__ = "Climbing Motion Tracker Team"
 from .pose_detection import PoseDetector, PoseFrame, PoseKeypoint
 from .video_processor import VideoProcessor, FrameProcessor
 from .visualization import PoseVisualizer
-from .main import ClimbingMotionTracker
 
 __all__ = [
     'PoseDetector',
@@ -18,6 +17,5 @@ __all__ = [
     'PoseKeypoint',
     'VideoProcessor',
     'FrameProcessor',
-    'PoseVisualizer',
-    'ClimbingMotionTracker'
+    'PoseVisualizer'
 ] 

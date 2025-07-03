@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass
-from pose_detection import PoseFrame
+from src.pose_detection import PoseFrame
 
 
 @dataclass
