@@ -517,7 +517,6 @@ class PoseVisualizer:
             rhythm_events = getattr(pose_frame, 'rhythm_events', [])
             
             overlay_frame = self.draw_rhythm_info(overlay_frame, rhythm_summary, draw_width, draw_height)
-            overlay_frame = self.draw_rhythm_events(overlay_frame, rhythm_events, draw_width, draw_height)
             overlay_frame = self.draw_movement_classification(overlay_frame, rhythm_events, draw_width, draw_height)
         
         # Draw motion blur effect
@@ -600,7 +599,6 @@ class PoseVisualizer:
             
             # Draw rhythm events
             rhythm_events = getattr(pose_frame, 'rhythm_events', [])
-            overlay_frame = self.draw_rhythm_events(overlay_frame, rhythm_events, width, height)
             overlay_frame = self.draw_movement_classification(overlay_frame, rhythm_events, width, height)
         
         return overlay_frame
@@ -864,49 +862,6 @@ class PoseVisualizer:
             'unknown': (128, 128, 128) # Gray
         }
         return color_map.get(pattern_type, (255, 255, 255))
-    
-    def draw_rhythm_events(self, frame: np.ndarray, rhythm_events: List, 
-                          frame_width: int, frame_height: int) -> np.ndarray:
-        """
-        Draw rhythm events on the frame.
-        
-        Args:
-            frame: Input frame
-            rhythm_events: List of recent rhythm events
-            frame_width: Frame width in pixels
-            frame_height: Frame height in pixels
-            
-        Returns:
-            Frame with rhythm event markers
-        """
-        # Show only recent events (last 10)
-        recent_events = rhythm_events[-10:] if len(rhythm_events) > 10 else rhythm_events
-        
-        for event in recent_events:
-            # Convert normalized coordinates to pixel coordinates
-            x = int(event.com_position[0] * frame_width)
-            y = int(event.com_position[1] * frame_height)
-            
-            # Get color based on event type
-            color_map = {
-                'reach': (0, 0, 255),    # Red
-                'pull': (0, 165, 255),   # Orange
-                'step': (255, 0, 255),   # Purple
-                'pause': (0, 255, 0),    # Green
-                'steady': (255, 0, 0),   # Blue
-            }
-            color = color_map.get(event.event_type, (255, 255, 255))
-            
-            # Draw event marker
-            cv2.circle(frame, (x, y), 6, color, -1)
-            cv2.circle(frame, (x, y), 10, color, 2)
-            
-            # Add event type label
-            label = event.event_type.upper()
-            cv2.putText(frame, label, (x + 15, y - 5), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
-        
-        return frame
     
     def draw_movement_classification(self, frame: np.ndarray, rhythm_events: List, 
                                    frame_width: int, frame_height: int) -> np.ndarray:

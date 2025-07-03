@@ -31,7 +31,8 @@ def process_video(input_video: str, output_video: str, quality_factor: float = 0
         '--show-trails',
         '--show-motion-blur',
         '--show-energy',
-        '--show-angles'
+        '--show-angles',
+        '--show-rhythm'
     ]
     
     print(f"🔄 Processing: {os.path.basename(input_video)}")
