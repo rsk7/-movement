@@ -22,7 +22,7 @@ python src/main.py --input path/to/your/climbing_video.mp4 --output path/to/outp
 ### Advanced Options
 
 ```bash
-python src/main.py \
+python -m src.main \
     --input input_video.mp4 \
     --output output_video.mp4 \
     --show-trails \
