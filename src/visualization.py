@@ -492,7 +492,15 @@ class PoseVisualizer:
         
         # Draw COM position (on top of skeleton)
         if show_com and pose_frame and pose_frame.com:
-            overlay_frame = self.draw_center_of_mass(overlay_frame, pose_frame.com, draw_width, draw_height)
+            # Get movement type from rhythm events if available
+            movement_type = None
+            rhythm_events = getattr(pose_frame, 'rhythm_events', [])
+            if rhythm_events:
+                latest_event = rhythm_events[-1]
+                movement_type = latest_event.event_type
+            
+            overlay_frame = self.draw_center_of_mass(overlay_frame, pose_frame.com, draw_width, draw_height, 
+                                                   movement_type=movement_type)
         
         # Draw joint angles
         if show_angles and angles:
@@ -509,7 +517,7 @@ class PoseVisualizer:
             rhythm_events = getattr(pose_frame, 'rhythm_events', [])
             
             overlay_frame = self.draw_rhythm_info(overlay_frame, rhythm_summary, draw_width, draw_height)
-            overlay_frame = self.draw_rhythm_events(overlay_frame, rhythm_events, draw_width, draw_height)
+            overlay_frame = self.draw_movement_classification(overlay_frame, rhythm_events, draw_width, draw_height)
         
         # Draw motion blur effect
         if show_motion_blur and pose_history:
@@ -565,7 +573,15 @@ class PoseVisualizer:
         
         # Draw COM position (on top of skeleton)
         if show_com and pose_frame and pose_frame.com:
-            overlay_frame = self.draw_center_of_mass(overlay_frame, pose_frame.com, width, height)
+            # Get movement type from rhythm events if available
+            movement_type = None
+            rhythm_events = getattr(pose_frame, 'rhythm_events', [])
+            if rhythm_events:
+                latest_event = rhythm_events[-1]
+                movement_type = latest_event.event_type
+            
+            overlay_frame = self.draw_center_of_mass(overlay_frame, pose_frame.com, width, height, 
+                                                   movement_type=movement_type)
         
         # Draw joint angles
         if show_angles and angles:
@@ -583,7 +599,7 @@ class PoseVisualizer:
             
             # Draw rhythm events
             rhythm_events = getattr(pose_frame, 'rhythm_events', [])
-            overlay_frame = self.draw_rhythm_events(overlay_frame, rhythm_events, width, height)
+            overlay_frame = self.draw_movement_classification(overlay_frame, rhythm_events, width, height)
         
         return overlay_frame
     
@@ -649,9 +665,10 @@ class PoseVisualizer:
     
     def draw_center_of_mass(self, frame: np.ndarray, com: Tuple[float, float, float], 
                            frame_width: int, frame_height: int, 
-                           color: Tuple[int, int, int] = (0, 255, 255)) -> np.ndarray:
+                           color: Tuple[int, int, int] = (0, 255, 255),
+                           movement_type: Optional[str] = None) -> np.ndarray:
         """
-        Draw the center of mass on the frame.
+        Draw the center of mass on the frame with optional movement type label.
         
         Args:
             frame: Input frame
@@ -659,6 +676,7 @@ class PoseVisualizer:
             frame_width: Frame width in pixels
             frame_height: Frame height in pixels
             color: Color for COM visualization (BGR format)
+            movement_type: Optional movement type to display next to COM
             
         Returns:
             Frame with COM visualization
@@ -681,6 +699,36 @@ class PoseVisualizer:
         # Add "COM" label
         cv2.putText(frame, "COM", (x+15, y-5), cv2.FONT_HERSHEY_SIMPLEX, 
                     0.5, color, 1)
+        
+        # Add movement type label if provided
+        if movement_type:
+            # Get color for movement type
+            movement_color_map = {
+                'reach': (0, 0, 255),    # Red
+                'pull': (0, 165, 255),   # Orange
+                'step': (255, 0, 255),   # Purple
+                'pause': (0, 255, 0),    # Green
+                'steady': (255, 0, 0),   # Blue
+            }
+            movement_color = movement_color_map.get(movement_type, (255, 255, 255))
+            
+            # Add background rectangle for better visibility
+            label_text = movement_type.upper()
+            (text_width, text_height), baseline = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            
+            # Position label below COM
+            label_x = x - text_width // 2
+            label_y = y + 25
+            
+            # Draw background rectangle
+            cv2.rectangle(frame, (label_x - 5, label_y - text_height - 5), 
+                         (label_x + text_width + 5, label_y + 5), (0, 0, 0), -1)
+            cv2.rectangle(frame, (label_x - 5, label_y - text_height - 5), 
+                         (label_x + text_width + 5, label_y + 5), movement_color, 2)
+            
+            # Draw movement type text
+            cv2.putText(frame, label_text, (label_x, label_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, movement_color, 2)
         
         return frame
 
@@ -815,44 +863,66 @@ class PoseVisualizer:
         }
         return color_map.get(pattern_type, (255, 255, 255))
     
-    def draw_rhythm_events(self, frame: np.ndarray, rhythm_events: List, 
-                          frame_width: int, frame_height: int) -> np.ndarray:
+    def draw_movement_classification(self, frame: np.ndarray, rhythm_events: List, 
+                                   frame_width: int, frame_height: int) -> np.ndarray:
         """
-        Draw rhythm events on the frame.
+        Draw movement classification information on the frame.
         
         Args:
             frame: Input frame
-            rhythm_events: List of recent rhythm events
+            rhythm_events: List of recent rhythm events with movement classification
             frame_width: Frame width in pixels
             frame_height: Frame height in pixels
             
         Returns:
-            Frame with rhythm event markers
+            Frame with movement classification overlay
         """
-        # Show only recent events (last 10)
-        recent_events = rhythm_events[-10:] if len(rhythm_events) > 10 else rhythm_events
+        if not rhythm_events:
+            return frame
         
-        for event in recent_events:
-            # Convert normalized coordinates to pixel coordinates
-            x = int(event.com_position[0] * frame_width)
-            y = int(event.com_position[1] * frame_height)
-            
-            # Get color based on event type
-            color_map = {
-                'reach': (0, 0, 255),    # Red
-                'pause': (0, 255, 0),    # Green
-                'steady': (255, 0, 0),   # Blue
-            }
-            color = color_map.get(event.event_type, (255, 255, 255))
-            
-            # Draw event marker
-            cv2.circle(frame, (x, y), 6, color, -1)
-            cv2.circle(frame, (x, y), 10, color, 2)
-            
-            # Add event type label
-            label = event.event_type.upper()
-            cv2.putText(frame, label, (x + 15, y - 5), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        # Get the most recent event
+        latest_event = rhythm_events[-1]
+        
+        # Position for movement info (bottom-left corner)
+        x_offset = 20
+        y_offset = frame_height - 120
+        line_height = 25
+        
+        # Background rectangle for text
+        cv2.rectangle(frame, (x_offset - 10, y_offset - 25), 
+                     (x_offset + 200, y_offset + 100), (0, 0, 0), -1)
+        cv2.rectangle(frame, (x_offset - 10, y_offset - 25), 
+                     (x_offset + 200, y_offset + 100), (255, 255, 255), 2)
+        
+        # Movement type with color coding
+        color_map = {
+            'reach': (0, 0, 255),    # Red
+            'pull': (0, 165, 255),   # Orange
+            'step': (255, 0, 255),   # Purple
+            'pause': (0, 255, 0),    # Green
+            'steady': (255, 0, 0),   # Blue
+        }
+        movement_color = color_map.get(latest_event.event_type, (255, 255, 255))
+        
+        movement_text = f"Movement: {latest_event.event_type.upper()}"
+        cv2.putText(frame, movement_text, (x_offset, y_offset), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, movement_color, 2)
+        
+        # Confidence
+        confidence_text = f"Confidence: {latest_event.confidence:.1%}"
+        cv2.putText(frame, confidence_text, (x_offset, y_offset + line_height), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Velocity
+        velocity_text = f"Velocity: {latest_event.velocity:.3f}"
+        cv2.putText(frame, velocity_text, (x_offset, y_offset + 2 * line_height), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Description
+        if hasattr(latest_event, 'description') and latest_event.description:
+            desc_text = latest_event.description[:30] + "..." if len(latest_event.description) > 30 else latest_event.description
+            cv2.putText(frame, desc_text, (x_offset, y_offset + 3 * line_height), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
         
         return frame
     
